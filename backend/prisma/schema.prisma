@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+enum Role {
+  USER
+  ADMIN
+}
+
+
+enum Provider {
+  EMAIL
+  GOOGLE
+}
+
+
+model User {
+
+  id String @id @default(uuid())
+
+
+  name String
+
+  email String @unique
+
+
+  password String?
+
+  avatar String?
+
+
+  provider Provider @default(EMAIL)
+
+
+  role Role @default(USER)
+
+
+  storageUsed BigInt @default(0)
+
+  storageLimit BigInt @default(1073741824)
+
+
+  files File[]
+
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+}
+
+model File {
+
+  id String @id @default(uuid())
+
+  name String
+
+  type String
+
+  size BigInt
+
+
+  s3Key String @unique
+
+  url String
+
+
+  userId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+}
