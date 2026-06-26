@@ -35,6 +35,10 @@ type AuthContextType = {
 
     logout: () => Promise<void>;
 
+    googleLogin: (
+        token: string
+    ) => Promise<User>;
+
 };
 
 
@@ -118,6 +122,28 @@ export const AuthProvider = ({
 
     };
 
+    const googleLogin = async (
+        token: string
+    ) => {
+
+        const res =
+            await api.post(
+                "/auth/google",
+                {
+                    token
+                }
+            );
+
+
+        setUser(
+            res.data.user
+        );
+
+
+        return res.data.user;
+
+    };
+
 
 
     return (
@@ -128,7 +154,8 @@ export const AuthProvider = ({
                 user,
                 loading,
                 setUser,
-                logout
+                logout,
+                googleLogin
             }}
 
         >

@@ -459,8 +459,21 @@ export function UserDashboard({ navigate }: Props) {
                 onClick={() =>
                   navigate("admin")
                 }
+
+                className="
+    px-4 py-2 
+    rounded-xl 
+    text-sm 
+    font-semibold 
+    bg-[#EEF0FF]
+    text-[#3D38F5]
+    hover:bg-[#E0E0FF]
+    transition
+  "
               >
+
                 Admin
+
               </button>
             )}
 
