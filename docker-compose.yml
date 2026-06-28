@@ -1,0 +1,25 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    image: cloudbox-backend
+    container_name: cloudbox-backend
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./backend/.env
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:5000/api
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID}
+    image: cloudbox-frontend
+    container_name: cloudbox-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
