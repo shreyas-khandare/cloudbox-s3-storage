@@ -45,7 +45,7 @@ importers:
         specifier: ^1.11.0
         version: 1.11.0
       prisma:
-        specifier: ^6.19.3
+        specifier: 6.19.3
         version: 6.19.3(typescript@6.0.3)
       zod:
         specifier: ^4.4.3

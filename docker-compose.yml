@@ -19,7 +19,7 @@ services:
     image: cloudbox-frontend
     container_name: cloudbox-frontend
     ports:
-      - "5173:80"
+      - "80:80"
     depends_on:
       - backend
     restart: unless-stopped
