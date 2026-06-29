@@ -3,6 +3,5 @@ dist
 .env
 .git
 .gitignore
-Dockerfile*
 npm-debug.log
 pnpm-debug.log
