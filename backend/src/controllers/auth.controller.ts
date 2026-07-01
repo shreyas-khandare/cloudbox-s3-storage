@@ -71,13 +71,9 @@ export const register = async (
             token,
             {
                 httpOnly: true,
-                secure:
-                    process.env.NODE_ENV === "production",
-
-                sameSite: "strict",
-
-                maxAge:
-                    7 * 24 * 60 * 60 * 1000
+                secure: false,
+                sameSite: "lax",
+                maxAge: 7 * 24 * 60 * 60 * 1000
             }
         );
 
@@ -164,11 +160,9 @@ export const login = async (
             token,
             {
                 httpOnly: true,
-                secure:
-                    process.env.NODE_ENV === "production",
-                sameSite: "strict",
-                maxAge:
-                    7 * 24 * 60 * 60 * 1000
+                secure: false,
+                sameSite: "lax",
+                maxAge: 7 * 24 * 60 * 60 * 1000
             }
         );
 
@@ -267,13 +261,11 @@ export const logout = (
 ) => {
 
 
-    res.clearCookie(
-        "token",
-        {
-            httpOnly: true,
-            sameSite: "lax"
-        }
-    );
+    res.clearCookie("token", {
+        httpOnly: true,
+        secure: false,
+        sameSite: "lax"
+    });
 
 
     res.json({
@@ -356,11 +348,9 @@ export const googleLogin = async (
             jwtToken,
             {
                 httpOnly: true,
-                secure:
-                    process.env.NODE_ENV === "production",
+                secure: false,
                 sameSite: "lax",
-                maxAge:
-                    7 * 24 * 60 * 60 * 1000
+                maxAge: 7 * 24 * 60 * 60 * 1000
             }
         );
 

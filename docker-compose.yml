@@ -14,7 +14,7 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_API_URL: http://localhost:5000/api
+        VITE_API_URL: http://13.206.143.126:5000/api
         VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID}
     image: cloudbox-frontend
     container_name: cloudbox-frontend
