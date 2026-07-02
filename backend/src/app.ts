@@ -15,11 +15,22 @@ import { errorHandler } from "./middlewares/error.middleware";
 const app = express();
 
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://13.206.143.126",
+];
+
 app.use(
-    cors({
-        origin: env.CLIENT_URL || "http://localhost:5173",
-        credentials: true
-    })
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
 );
 
 

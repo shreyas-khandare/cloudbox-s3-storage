@@ -13,29 +13,29 @@ interface Props {
 const FEATURES = [
   {
     icon: Shield,
-    title: "Secure Private Storage",
-    desc: "Military-grade AES-256 encryption ensures your files stay completely private. Zero-knowledge architecture means even we can't see your data.",
+    title: "Secure Cloud Storage",
+    desc: "Files stored securely on Amazon S3 with AES-256 encryption at rest.",
     color: "#3D38F5",
     bg: "#EEF0FF",
   },
   {
     icon: Zap,
     title: "Lightning Fast Uploads",
-    desc: "Multi-threaded upload engine delivers blazing speeds up to 1 Gbps. Chunked transfers resume automatically after any interruption.",
+    desc: "Upload and access files from anywhere.",
     color: "#6C63FF",
     bg: "#F0EEFF",
   },
   {
     icon: Lock,
-    title: "Encrypted Access",
-    desc: "Two-factor authentication, SSO support, and granular permission controls keep every access point secured and auditable.",
+    title: "JWT Authentication",
+    desc: "Secure user authentication with protected routes.",
     color: "#4F46E5",
     bg: "#EEF0FF",
   },
   {
     icon: FolderOpen,
-    title: "Smart File Management",
-    desc: "AI-powered organization, instant full-text search across all files, version history, and smart tags that adapt to your workflow.",
+    title: "Simple File Management",
+    desc: "Upload, download and organize files in one place.",
     color: "#7C3AED",
     bg: "#F3EEFF",
   },
@@ -49,36 +49,51 @@ const FLOATING_FILES = [
 ];
 
 const STATS = [
-  { value: "500K+", label: "Active Users" },
-  { value: "2PB+", label: "Data Stored" },
-  { value: "99.99%", label: "Uptime SLA" },
-  { value: "150ms", label: "Avg Latency" },
+  { value: "1 GB", label: "Free Plan" },
+  { value: "AES-256", label: "Encrypted at Rest" },
+  { value: "JWT", label: "Secure Authentication" },
+  { value: "100%", label: "User Controlled" },
 ];
 
 const PLANS = [
   {
     name: "Free",
-    price: "$0",
+    price: "₹0",
     period: "/month",
     storage: "1 GB",
-    features: ["1 GB secure storage", "File sharing links", "Basic encryption", "Web & mobile access", "5 file versions"],
-    accent: false,
+    accent: true,
+    features: [
+      "1 GB Storage",
+      "100 MB Max File Size",
+      "Secure File Uploads",
+      "Basic File Management",
+    ],
   },
   {
     name: "Pro",
-    price: "$9",
+    price: "₹149",
     period: "/month",
     storage: "100 GB",
-    features: ["100 GB secure storage", "Advanced sharing controls", "AES-256 encryption", "All platforms + API", "Unlimited versions", "Priority support"],
-    accent: true,
+    accent: false,
+    features: [
+      "100 GB Storage",
+      "Priority Support",
+      "Large File Uploads",
+      "Advanced Sharing",
+    ],
   },
   {
     name: "Business",
-    price: "$29",
+    price: "₹399",
     period: "/month",
-    storage: "2 TB",
-    features: ["2 TB secure storage", "Team collaboration", "Admin controls", "SSO + SAML", "Audit logs", "Dedicated support", "Custom branding"],
+    storage: "1 TB",
     accent: false,
+    features: [
+      "1 TB Storage",
+      "Team Collaboration",
+      "Admin Controls",
+      "API Access",
+    ],
   },
 ];
 
@@ -100,7 +115,7 @@ export function LandingPage({ navigate }: Props) {
           </button>
 
           <div className="hidden md:flex items-center gap-8">
-            {["Features", "Pricing", "About"].map((item) => (
+            {["Features", "Pricing"].map((item) => (
               <a key={item} href={`#${item.toLowerCase()}`}
                 className="text-sm font-medium text-[#6B6B8A] hover:text-[#1A1A2E] transition-colors cursor-pointer">
                 {item}
@@ -127,7 +142,7 @@ export function LandingPage({ navigate }: Props) {
 
         {mobileOpen && (
           <div className="md:hidden px-6 pb-4 flex flex-col gap-3 border-t border-white/30 pt-4">
-            {["Features", "Pricing", "About"].map((item) => (
+            {["Features", "Pricing"].map((item) => (
               <a key={item} href={`#${item.toLowerCase()}`}
                 className="text-sm font-medium text-[#6B6B8A] hover:text-[#1A1A2E] transition-colors"
                 onClick={() => setMobileOpen(false)}>
@@ -210,7 +225,7 @@ export function LandingPage({ navigate }: Props) {
                   </div>
                   <div className="flex-1 mx-3 h-5 rounded-md flex items-center px-2"
                     style={{ background: "rgba(255,255,255,0.1)", fontSize: "9px", color: "rgba(255,255,255,0.4)" }}>
-                    app.Storeme.io/dashboard
+                    app.cloudstorageplatform
                   </div>
                 </div>
 
@@ -365,65 +380,194 @@ export function LandingPage({ navigate }: Props) {
       </section>
 
       {/* Storage / Pricing Section */}
-      <section id="pricing" className="py-24 px-6" style={{ background: "linear-gradient(135deg, #1A1A2E 0%, #2C2C2C 100%)" }}>
+      {/* Storage / Pricing Section */}
+      <section
+        id="pricing"
+        className="py-24 px-6"
+        style={{
+          background: "linear-gradient(135deg, #1A1A2E 0%, #2C2C2C 100%)",
+        }}
+      >
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-4"
-              style={{ background: "rgba(61,56,245,0.2)", color: "#8B87FF" }}>
+            <div
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-4"
+              style={{
+                background: "rgba(61,56,245,0.2)",
+                color: "#8B87FF",
+              }}
+            >
               Simple Pricing
             </div>
-            <h2 className="cloudbox-font-display mb-4" style={{ fontSize: "clamp(1.875rem, 4vw, 2.5rem)", fontWeight: 800, color: "#fff" }}>
+
+            <h2
+              className="cloudbox-font-display mb-4"
+              style={{
+                fontSize: "clamp(1.875rem, 4vw, 2.5rem)",
+                fontWeight: 800,
+                color: "#fff",
+              }}
+            >
               Start free. Scale as you grow.
             </h2>
-            <p style={{ fontSize: "1rem", color: "#9090A8", lineHeight: 1.75 }}>
+
+            <p
+              style={{
+                fontSize: "1rem",
+                color: "#9090A8",
+                lineHeight: 1.75,
+              }}
+            >
               No hidden fees. No surprise bills. Just transparent, fair pricing.
             </p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-6">
-            {PLANS.map((plan) => (
-              <div key={plan.name}
-                className={`relative p-7 rounded-2xl transition-transform hover:-translate-y-1 ${plan.accent ? "accent-gradient shadow-2xl shadow-[#3D38F5]/40" : ""}`}
-                style={!plan.accent ? { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" } : {}}>
-                {plan.accent && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-bold"
-                    style={{ background: "#fff", color: "#3D38F5" }}>
-                    Most Popular
+            {PLANS.map((plan) => {
+              const comingSoon = plan.name !== "Free";
+
+              return (
+                <div
+                  key={plan.name}
+                  className={`relative p-7 rounded-2xl transition-transform hover:-translate-y-1 ${comingSoon ? "opacity-70" : ""
+                    } ${plan.accent ? "accent-gradient shadow-2xl shadow-[#3D38F5]/40" : ""}`}
+                  style={
+                    !plan.accent
+                      ? {
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                      }
+                      : {}
+                  }
+                >
+                  {!comingSoon && plan.accent && (
+                    <div
+                      className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-bold"
+                      style={{
+                        background: "#fff",
+                        color: "#3D38F5",
+                      }}
+                    >
+                      Free Forever
+                    </div>
+                  )}
+
+                  {comingSoon && (
+                    <div
+                      className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-bold"
+                      style={{
+                        background: "#4B5563",
+                        color: "#fff",
+                      }}
+                    >
+                      Coming Soon
+                    </div>
+                  )}
+
+                  <div className="mb-6">
+                    <p
+                      className="mb-1"
+                      style={{
+                        fontSize: "0.75rem",
+                        fontWeight: 600,
+                        color: plan.accent
+                          ? "rgba(255,255,255,0.7)"
+                          : "#9090A8",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                      }}
+                    >
+                      {plan.name}
+                    </p>
+
+                    <div className="flex items-end gap-1">
+                      <span
+                        className="cloudbox-font-display"
+                        style={{
+                          fontSize: "2.5rem",
+                          fontWeight: 800,
+                          color: "#fff",
+                        }}
+                      >
+                        {plan.price}
+                      </span>
+
+                      <span
+                        className="mb-2"
+                        style={{
+                          fontSize: "0.875rem",
+                          color: plan.accent
+                            ? "rgba(255,255,255,0.6)"
+                            : "#9090A8",
+                        }}
+                      >
+                        {plan.period}
+                      </span>
+                    </div>
+
+                    <p
+                      style={{
+                        fontSize: "0.875rem",
+                        color: plan.accent
+                          ? "rgba(255,255,255,0.8)"
+                          : "#9090A8",
+                      }}
+                    >
+                      {plan.storage} storage
+                    </p>
                   </div>
-                )}
-                <div className="mb-6">
-                  <p className="mb-1" style={{ fontSize: "0.75rem", fontWeight: 600, color: plan.accent ? "rgba(255,255,255,0.7)" : "#9090A8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    {plan.name}
-                  </p>
-                  <div className="flex items-end gap-1">
-                    <span className="cloudbox-font-display" style={{ fontSize: "2.5rem", fontWeight: 800, color: "#fff" }}>{plan.price}</span>
-                    <span className="mb-2" style={{ fontSize: "0.875rem", color: plan.accent ? "rgba(255,255,255,0.6)" : "#9090A8" }}>{plan.period}</span>
-                  </div>
-                  <p style={{ fontSize: "0.875rem", color: plan.accent ? "rgba(255,255,255,0.8)" : "#9090A8" }}>
-                    {plan.storage} storage
-                  </p>
+
+                  <ul className="space-y-3 mb-7">
+                    {plan.features.map((f) => (
+                      <li key={f} className="flex items-center gap-2.5">
+                        <CheckCircle2
+                          className="w-4 h-4 flex-shrink-0"
+                          style={{
+                            color: plan.accent ? "#fff" : "#3D38F5",
+                          }}
+                        />
+                        <span
+                          style={{
+                            fontSize: "0.875rem",
+                            color: plan.accent
+                              ? "rgba(255,255,255,0.9)"
+                              : "#B8B8D0",
+                          }}
+                        >
+                          {f}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <button
+                    onClick={() => {
+                      if (!comingSoon) navigate("register");
+                    }}
+                    disabled={comingSoon}
+                    className="w-full py-3 rounded-xl text-sm font-semibold transition-all"
+                    style={{
+                      background: comingSoon
+                        ? "#4B5563"
+                        : plan.accent
+                          ? "#fff"
+                          : "rgba(61,56,245,0.2)",
+                      color: comingSoon
+                        ? "#D1D5DB"
+                        : plan.accent
+                          ? "#3D38F5"
+                          : "#8B87FF",
+                      border: plan.accent
+                        ? "none"
+                        : "1px solid rgba(61,56,245,0.3)",
+                      cursor: comingSoon ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {comingSoon ? "Coming Soon" : "Get Started"}
+                  </button>
                 </div>
-
-                <ul className="space-y-3 mb-7">
-                  {plan.features.map((f) => (
-                    <li key={f} className="flex items-center gap-2.5">
-                      <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: plan.accent ? "#fff" : "#3D38F5" }} />
-                      <span style={{ fontSize: "0.875rem", color: plan.accent ? "rgba(255,255,255,0.9)" : "#B8B8D0" }}>{f}</span>
-                    </li>
-                  ))}
-                </ul>
-
-                <button onClick={() => navigate("register")}
-                  className="w-full py-3 rounded-xl text-sm font-semibold transition-all hover:opacity-90"
-                  style={{
-                    background: plan.accent ? "#fff" : "rgba(61,56,245,0.2)",
-                    color: plan.accent ? "#3D38F5" : "#8B87FF",
-                    border: plan.accent ? "none" : "1px solid rgba(61,56,245,0.3)",
-                  }}>
-                  Get Started
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>
@@ -440,8 +584,8 @@ export function LandingPage({ navigate }: Props) {
               Ready to secure your digital life?
             </h2>
             <p className="mb-8" style={{ fontSize: "1rem", color: "#6B6B8A", lineHeight: 1.75 }}>
-              Join over 500,000 users who trust CloudBox with their most important files.
-              Get 1 GB free — no credit card required.
+              Securely store, organize, and access your files from anywhere.
+              Get started with 1 GB of free storage no credit card required.
             </p>
             <button onClick={() => navigate("register")}
               className="inline-flex items-center gap-2 px-8 py-3.5 text-white rounded-xl font-semibold text-sm accent-gradient shadow-lg shadow-[#3D38F5]/30 hover:opacity-90 transition-all hover:-translate-y-0.5">
@@ -467,10 +611,10 @@ export function LandingPage({ navigate }: Props) {
                 Enterprise-grade cloud storage for modern teams and individuals.
               </p>
               <div className="flex gap-3">
-                {["X", "G", "in"].map((item, i) => (
+                {["in"].map((item, i) => (
                   <a
                     key={i}
-                    href="#"
+                    href="https://www.linkedin.com/in/shreyas-khandare-7b6413322/"
                     className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[#3D38F5]/20"
                     style={{ background: "rgba(255,255,255,0.06)" }}
                   >
@@ -490,7 +634,7 @@ export function LandingPage({ navigate }: Props) {
 
             {[
               { title: "Product", links: ["Features", "Security", "Integrations", "Changelog"] },
-              { title: "Company", links: ["About", "Blog", "Careers", "Press"] },
+              // { title: "Company", links: ["About", "Blog", "Careers", "Press"] },
               { title: "Support", links: ["Help Center", "Community", "Status", "Contact"] },
             ].map((col) => (
               <div key={col.title}>
@@ -512,14 +656,14 @@ export function LandingPage({ navigate }: Props) {
           <div className="border-t pt-8 flex flex-col sm:flex-row justify-between items-center gap-4"
             style={{ borderColor: "rgba(255,255,255,0.08)" }}>
             <p style={{ fontSize: "0.8125rem", color: "#6B6B8A" }}>
-              © 2026 CloudBox Inc. All rights reserved.
+              © 2026 CloudBox.
             </p>
-            <div className="flex gap-6">
+            {/* <div className="flex gap-6">
               {["Privacy Policy", "Terms of Service", "Cookie Policy"].map((item) => (
                 <a key={item} href="#" style={{ fontSize: "0.8125rem", color: "#6B6B8A" }}
                   className="hover:text-white transition-colors">{item}</a>
               ))}
-            </div>
+            </div> */}
           </div>
         </div>
       </footer>

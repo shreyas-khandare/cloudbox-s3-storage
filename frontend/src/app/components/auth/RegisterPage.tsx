@@ -124,9 +124,9 @@ export function RegisterPage({ navigate }: Props) {
           <div className="space-y-5">
             {[
               { title: "1 GB Free Storage", desc: "Start immediately, no credit card needed" },
-              { title: "Military-grade Encryption", desc: "AES-256 encryption at rest and in transit" },
+              { title: "AES-256 Encryption", desc: "Files encrypted at rest with Amazon S3" },
               { title: "Access Anywhere", desc: "Web, desktop, and mobile apps available" },
-              { title: "Instant Sharing", desc: "Share files with a single secure link" },
+              { title: "Simple File Management", desc: "Upload, organize and access your files anytime" },
             ].map((item) => (
               <div key={item.title} className="flex items-start gap-3">
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
@@ -158,7 +158,7 @@ export function RegisterPage({ navigate }: Props) {
               Create your account
             </h1>
             <p style={{ fontSize: "0.9375rem", color: "#6B6B8A" }}>
-              Start with 1 GB free — no credit card required
+              Start with 1 GB free  no credit card required
             </p>
           </div>
 
@@ -276,13 +276,6 @@ export function RegisterPage({ navigate }: Props) {
               )}
             </button>
           </form>
-
-          <p className="text-center mt-4" style={{ fontSize: "0.75rem", color: "#9090A8", lineHeight: 1.6 }}>
-            By creating an account, you agree to our{" "}
-            <a href="#" className="text-[#3D38F5] hover:underline">Terms of Service</a>{" "}
-            and{" "}
-            <a href="#" className="text-[#3D38F5] hover:underline">Privacy Policy</a>.
-          </p>
 
           <p className="text-center mt-6" style={{ fontSize: "0.875rem", color: "#6B6B8A" }}>
             Already have an account?{" "}

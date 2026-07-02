@@ -119,22 +119,22 @@ export function LoginPage({ navigate }: Props) {
         <div className="relative z-10">
           <blockquote className="mb-8">
             <p className="cloudbox-font-display mb-4" style={{ fontSize: "1.75rem", fontWeight: 700, color: "#fff", lineHeight: 1.3 }}>
-              "CloudBox has completely transformed how our team manages files. Fast, secure, and incredibly reliable."
+              "Securely store, organize, and access your files from anywhere."
             </p>
             <footer className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold"
                 style={{ background: "linear-gradient(135deg, #3D38F5, #6C63FF)" }}>
-                SJ
+                SK
               </div>
-              <div>
+              {/* <div>
                 <p style={{ fontSize: "0.875rem", fontWeight: 600, color: "#fff" }}>Sarah Johnson</p>
                 <p style={{ fontSize: "0.75rem", color: "#9090A8" }}>CTO at Axiom Labs</p>
-              </div>
+              </div> */}
             </footer>
           </blockquote>
 
           <div className="flex gap-6">
-            {[["500K+", "Users"], ["99.99%", "Uptime"], ["2PB+", "Stored"]].map(([val, label]) => (
+            {[["1 GB", "Free Plan"], ["AES-256", "Encryption at Rest"], ["Amazon S3", "Cloud Storage"]].map(([val, label]) => (
               <div key={label}>
                 <p className="cloudbox-font-display" style={{ fontSize: "1.25rem", fontWeight: 700, color: "#fff" }}>{val}</p>
                 <p style={{ fontSize: "0.75rem", color: "#6B6B8A" }}>{label}</p>
@@ -239,11 +239,11 @@ export function LoginPage({ navigate }: Props) {
             </div>
 
             <div>
-              <div className="flex justify-between items-center mb-1.5">
+              {/* <div className="flex justify-between items-center mb-1.5">
                 <label style={{ fontSize: "0.875rem", fontWeight: 600, color: "#1A1A2E" }}>Password</label>
                 <a href="#" style={{ fontSize: "0.8125rem", color: "#3D38F5", fontWeight: 500 }}
                   className="hover:underline">Forgot password?</a>
-              </div>
+              </div> */}
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
