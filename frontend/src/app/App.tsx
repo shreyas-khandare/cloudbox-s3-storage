@@ -3,18 +3,15 @@ import {
   Routes,
   Route,
   useNavigate,
-  Navigate
+  Navigate,
 } from "react-router-dom";
-
 
 import { LandingPage } from "./components/landing/LandingPage";
 import { LoginPage } from "./components/auth/LoginPage";
 import { RegisterPage } from "./components/auth/RegisterPage";
 import { UserDashboard } from "./components/dashboard/UserDashboard";
 import { AdminDashboard } from "./components/admin/AdminDashboard";
-
 import { useAuth } from "../context/AuthContext";
-
 
 export type Page =
   | "landing"
@@ -23,185 +20,90 @@ export type Page =
   | "dashboard"
   | "admin";
 
-
-
 function ProtectedRoute({
-  children
+  children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
-
-
-  const {
-    user,
-    loading
-  } = useAuth();
-
+  const { user, loading } = useAuth();
 
   if (loading) {
-
-    return (
-      <div>
-        Loading...
-      </div>
-    );
-
+    return <div>Loading...</div>;
   }
-
 
   if (!user) {
-
-    return (
-      <Navigate
-        to="/login"
-        replace
-      />
-    );
-
+    return <Navigate to="/login" replace />;
   }
-
 
   return children;
-
-
 }
 
-
-
 function AppRoutes() {
+  const { user, loading } = useAuth();
+  const routerNavigate = useNavigate();
 
-
-  const {
-    user,
-    loading
-  } = useAuth();
-
-
-  const routerNavigate =
-    useNavigate();
-
-
-  const navigate = (
-    page: Page
-  ) => {
-
-
-    const paths = {
-
+  const navigate = (page: Page) => {
+    const paths: Record<Page, string> = {
       landing: "/",
-
       login: "/login",
-
       register: "/register",
-
       dashboard: "/dashboard",
-
-      admin: "/admin"
-
+      admin: "/admin",
     };
 
-
-    routerNavigate(
-      paths[page]
-    );
-
+    routerNavigate(paths[page]);
   };
 
-
   if (loading) {
-
-    return (
-      <div>
-        Loading...
-      </div>
-    );
-
+    return <div>Loading...</div>;
   }
 
-
   return (
-
     <Routes>
-
-
       <Route
         path="/"
-        element={
-          <LandingPage navigate={navigate} />
-        }
+        element={<LandingPage navigate={navigate} />}
       />
-
 
       <Route
         path="/login"
-        element={
-          <LoginPage navigate={navigate} />
-        }
+        element={<LoginPage navigate={navigate} />}
       />
-
 
       <Route
         path="/register"
-        element={
-          <RegisterPage navigate={navigate} />
-        }
+        element={<RegisterPage navigate={navigate} />}
       />
-
 
       <Route
         path="/dashboard"
         element={
-
           <ProtectedRoute>
-
             <UserDashboard navigate={navigate} />
-
           </ProtectedRoute>
-
         }
       />
-
 
       <Route
         path="/admin"
         element={
-
-          user?.role === "ADMIN"
-
-            ?
-
+          !user ? (
+            <Navigate to="/login" replace />
+          ) : user.role !== "ADMIN" ? (
+            <Navigate to="/dashboard" replace />
+          ) : (
             <AdminDashboard navigate={navigate} />
-
-            :
-
-            <Navigate
-              to="/dashboard"
-              replace
-            />
-
+          )
         }
       />
-
-
     </Routes>
-
   );
-
 }
 
-
-
 export default function App() {
-
-
   return (
-
     <BrowserRouter>
-
       <AppRoutes />
-
     </BrowserRouter>
-
   );
-
 }

@@ -1,43 +1,38 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
+import { findValidSession } from "../services/session.service";
 
-
-export const protect = (
+export const protect = async (
     req: Request,
     res: Response,
     next: NextFunction
-) => {
+): Promise<void> => {
+    try{
+        const token = req.cookies?.token;
 
-    try {
-
-        const token = req.cookies.token;
-
-
-        if (!token) {
-            return res.status(401).json({
-                message: "Not authorized"
-            });
+        if(!token || typeof token !== "string"){
+            res.status(401).json({message: "Not Authorized"});
+            return;
         }
 
+        const session = await findValidSession(token);
 
-        const decoded = jwt.verify(
-            token,
-            process.env.JWT_SECRET!
-        );
+        if(!session){
+            res.status(401).json({message: "Invalid or expired Session"});
+            return;
+        }
 
-
-        (req as any).user = decoded;
-
+        //preserve the user info expected by existing controller
+        (req as any).user = {
+            id: session.user.id,
+            role: session.user.role,
+        };
 
         next();
+    }catch (error){
+        console.error("[Auth Middleware] Session Validation Failed:", error);
 
-
-    } catch (error) {
-
-        return res.status(401).json({
-            message: "Invalid token"
+        res.status(500).json({
+            message: "Authentication service temporarily unavailable",
         });
-
     }
-
 };

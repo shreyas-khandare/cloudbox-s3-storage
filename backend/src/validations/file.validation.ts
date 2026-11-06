@@ -1,44 +1,50 @@
 import { z } from "zod";
 
 
+
 export const uploadUrlSchema = z.object({
+    fileName: z
+        .string()
+        .min(1, "File name is required")
+        .max(255, "File name must not exceed 255 characters")
+        .refine(
+            (name) => !name.includes("/") && !name.includes("\\"),
+            "File name must not contain path separators"
+        ),
 
-    fileName:
-        z.string()
-        .min(1),
+    fileType: z
+        .string()
+        .min(1, "File type is required")
+        .max(100, "File type is too long"),
 
-
-    fileType:
-        z.string()
-        .min(1),
-
-
-    fileSize:
-        z.number()
+    fileSize: z
+        .number()
+        .int()
         .positive()
-
+        .max(50 * 1024 * 1024, "File size must not exceed 50 MB"),
 });
 
 
+
 export const saveFileSchema = z.object({
+    name: z
+        .string()
+        .min(1, "File name is required")
+        .max(255, "File name must not exceed 255 characters"),
 
-    name:
-        z.string()
-        .min(1),
+    type: z
+        .string()
+        .min(1, "File type is required")
+        .max(100, "File type is too long"),
 
+    size: z
+        .number()
+        .int()
+        .positive()
+        .max(50 * 1024 * 1024, "File size must not exceed 50 MB"),
 
-    type:
-        z.string()
-        .min(1),
-
-
-    size:
-        z.number()
-        .positive(),
-
-
-    s3Key:
-        z.string()
-        .min(1)
-
+    s3Key: z
+        .string()
+        .min(1, "S3 key is required")
+        .max(1024, "S3 key is too long"),
 });

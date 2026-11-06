@@ -1,7 +1,24 @@
-node_modules
-dist
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables and secrets
 .env
-.git
-.gitignore
-npm-debug.log
-pnpm-debug.log
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Git
+.git/
+
+# OS files
+.DS_Store
+Thumbs.db
+backups/

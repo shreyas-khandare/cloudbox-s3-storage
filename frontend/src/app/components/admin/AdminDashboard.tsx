@@ -59,42 +59,43 @@ export function AdminDashboard({ navigate }: Props) {
   const [activeNav, setActiveNav] = useState("overview");
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [files, setFiles] = useState<AdminFile[]>([]);
-  const { user } = useAuth();
+  const [loadingData, setLoadingData] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+  const { user, logout } = useAuth();
   useEffect(() => {
     fetchAdminData();
   }, []);
 
 
 
+
+
   const fetchAdminData = async () => {
+    setLoadingData(true);
+    setErrorMessage("");
+
     try {
-      const statsRes =
-        await api.get(
-          "/admin/stats"
-        );
-      const usersRes =
-        await api.get(
-          "/admin/users"
-        );
-      const filesRes =
-        await api.get(
-          "/admin/files"
-        );
-      setStats(
-        statsRes.data
-      );
-      setUsers(
-        usersRes.data.users
-      );
-      setFiles(
-        filesRes.data.files
-      );
+      const [statsRes, usersRes, filesRes] = await Promise.all([
+        api.get("/admin/stats"),
+        api.get("/admin/users"),
+        api.get("/admin/files"),
+      ]);
+
+      setStats(statsRes.data);
+      setUsers(usersRes.data.users);
+      setFiles(filesRes.data.files);
     } catch (error) {
-      console.log(
-        error
+      console.error("Failed to fetch admin dashboard data:", error);
+
+      setErrorMessage(
+        "Unable to load dashboard data. Please try again."
       );
+    } finally {
+      setLoadingData(false);
     }
   };
+
+
 
   const filtered = users.filter((u) => {
     const matchSearch = (u.name || "").toLowerCase().includes(search.toLowerCase())
@@ -208,20 +209,59 @@ export function AdminDashboard({ navigate }: Props) {
               {user?.email}
             </p>
           </div>
-          <button onClick={() => navigate("landing")} className="p-1 rounded-lg hover:bg-[#3A3A4A] transition-colors">
-            <LogOut className="w-4 h-4" style={{ color: "rgba(255,255,255,0.4)" }} />
+
+          <button
+            onClick={async () => {
+              try {
+                await logout();
+              } finally {
+                navigate("login");
+              }
+            }}
+            title="Log out"
+            className="p-1 rounded-lg hover:bg-[#3A3A4A] transition-colors"
+          >
+            <LogOut
+              className="w-4 h-4"
+              style={{ color: "rgba(255,255,255,0.4)" }}
+            />
           </button>
         </div>
       </aside>
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <nav className="flex lg:hidden items-center gap-2 overflow-x-auto border-b border-[#E8E8F0] bg-white p-3">
+          {[
+            { id: "overview", label: "Overview", icon: BarChart3 },
+            { id: "users", label: "Users", icon: Users },
+            { id: "files", label: "All Files", icon: FolderOpen },
+          ].map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setActiveNav(item.id)}
+              className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${activeNav === item.id
+                  ? "bg-[#3D38F5] text-white"
+                  : "bg-[#F4F4FF] text-[#6B6B8A] hover:bg-[#EEF0FF]"
+                }`}
+            >
+              <item.icon className="h-4 w-4" />
+              {item.label}
+            </button>
+          ))}
+        </nav>
         {/* Header */}
         <header className="flex items-center gap-4 px-6 h-16 border-b flex-shrink-0"
           style={{ background: "#fff", borderColor: "#E8E8F0" }}>
           <div>
             <h1 className="cloudbox-font-display" style={{ fontSize: "1.125rem", fontWeight: 700, color: "#1A1A2E" }}>Admin Dashboard</h1>
-            <p style={{ fontSize: "0.75rem", color: "#9090A8" }}>June 19, 2026</p>
+            <p style={{ fontSize: "0.75rem", color: "#9090A8" }}>{new Date().toLocaleDateString("en-IN", {
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            })}
+            </p>
           </div>
 
           <div className="flex items-center gap-2 ml-auto">
@@ -237,9 +277,9 @@ export function AdminDashboard({ navigate }: Props) {
               style={{ background: "#F9F9FF" }}>
               <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold"
                 style={{ background: "linear-gradient(135deg, #EF4444, #EC4899)" }}>
-                SA
+                {user?.name?.trim().charAt(0).toUpperCase() || "A"}
               </div>
-              <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#1A1A2E" }}>Super Admin</span>
+              <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#1A1A2E" }}>{user?.name || "Admin"}</span>
               <ChevronDown className="w-3.5 h-3.5 text-[#9090A8]" />
             </div>
           </div>
@@ -248,94 +288,127 @@ export function AdminDashboard({ navigate }: Props) {
 
         <main className="flex-1 overflow-y-auto p-6">
 
-          {activeNav === "files" && (
-            <div
-              className="rounded-2xl border border-[#E8E8F0] overflow-hidden"
-              style={{
-                background: "#fff"
-              }}
-            >
-              <div
-                className="px-6 py-4 border-b"
-                style={{
-                  borderColor: "#F0F0FF"
-                }}
-              >
-                <h2
-                  className="cloudbox-font-display"
-                  style={{
-                    fontSize: "1rem",
-                    fontWeight: 700
-                  }}
-                >
-                  All Files
-                </h2>
-                <p
-                  style={{
-                    fontSize: "0.8125rem",
-                    color: "#9090A8"
-                  }}
-                >
-                  {files.length} files
-                </p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr>
-                      <th className="px-6 py-3 text-left">
-                        File
-                      </th>
-                      <th className="px-4 py-3 text-left">
-                        Owner
-                      </th>
-                      <th className="px-4 py-3 text-left">
-                        Size
-                      </th>
-                      <th className="px-4 py-3 text-left">
-                        Uploaded
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {files.map((file) => (
-                      <tr
-                        key={file.id}
-                        className="border-t"
-                      >
-                        <td className="px-6 py-4">
-                          {file.name}
-                        </td>
-                        <td className="px-4 py-4">
-                          {file.user.email}
-                        </td>
-                        <td className="px-4 py-4">
-                          {(
-                            Number(file.size)
-                            /
-                            1024
-                            /
-                            1024
-                          ).toFixed(2)} MB
-                        </td>
-                        <td className="px-4 py-4">
-                          {
-                            new Date(
-                              file.createdAt
-                            ).toLocaleDateString()
-                          }
-                        </td>
-
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          {loadingData && (
+            <div className="py-10 text-center text-sm text-[#6B6B8A]">
+              Loading admin dashboard...
             </div>
           )}
 
+          {!loadingData && errorMessage && (
+            <div
+              role="alert"
+              className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4"
+            >
+              <p className="text-sm text-red-700">{errorMessage}</p>
+
+              <button
+                type="button"
+                onClick={fetchAdminData}
+                className="mt-3 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {!loadingData && !errorMessage && activeNav === "files" && (<div
+            className="rounded-2xl border border-[#E8E8F0] overflow-hidden"
+            style={{
+              background: "#fff"
+            }}
+          >
+            <div
+              className="px-6 py-4 border-b"
+              style={{
+                borderColor: "#F0F0FF"
+              }}
+            >
+              <h2
+                className="cloudbox-font-display"
+                style={{
+                  fontSize: "1rem",
+                  fontWeight: 700
+                }}
+              >
+                All Files
+              </h2>
+              <p
+                style={{
+                  fontSize: "0.8125rem",
+                  color: "#9090A8"
+                }}
+              >
+                {files.length} files
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr>
+                    <th className="px-6 py-3 text-left">
+                      File
+                    </th>
+                    <th className="px-4 py-3 text-left">
+                      Owner
+                    </th>
+                    <th className="px-4 py-3 text-left">
+                      Size
+                    </th>
+                    <th className="px-4 py-3 text-left">
+                      Uploaded
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {files.map((file) => (
+                    <tr
+                      key={file.id}
+                      className="border-t"
+                    >
+                      <td className="px-6 py-4">
+                        {file.name || "Untitled file"}
+                      </td>
+                      <td className="px-4 py-4">
+                        {file.user.email || "Unknown user"}
+                      </td>
+                      <td className="px-4 py-4">
+                        {(
+                          Number(file.size)
+                          /
+                          1024
+                          /
+                          1024
+                        ).toFixed(2)} MB
+                      </td>
+                      <td className="px-4 py-4">
+                        {
+                          new Date(
+                            file.createdAt
+                          ).toLocaleDateString()
+                        }
+                      </td>
+
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {files.length === 0 && (
+              <div className="py-12 text-center">
+                <FolderOpen className="mx-auto mb-3 h-10 w-10 text-[#D4D4F0]" />
+                <p className="text-sm font-semibold text-[#1A1A2E]">
+                  No files found
+                </p>
+                <p className="mt-1 text-sm text-[#9090A8]">
+                  Files uploaded by users will appear here.
+                </p>
+              </div>
+            )}
+          </div>
+          )}
+
           {/* Stats grid */}
-          {activeNav === "overview" && (
+          {!loadingData && !errorMessage && activeNav === "overview" && (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
               {ADMIN_STATS.map((stat) => (
                 <div key={stat.label} className="p-5 rounded-2xl border border-[#E8E8F0] hover:border-[#3D38F5]/20 hover:shadow-lg hover:shadow-[#3D38F5]/05 transition-all"
@@ -356,7 +429,7 @@ export function AdminDashboard({ navigate }: Props) {
 
 
           {/* User management */}
-          {activeNav === "users" && (
+          {!loadingData && !errorMessage && activeNav === "users" && (
             <div className="rounded-2xl border border-[#E8E8F0] overflow-hidden" style={{ background: "#fff" }}>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-6 py-4 border-b" style={{ borderColor: "#F0F0FF" }}>
                 <div>
@@ -427,17 +500,17 @@ export function AdminDashboard({ navigate }: Props) {
 
                               </div>
                               <div>
-                                <p style={{ fontSize: "0.875rem", fontWeight: 600, color: "#1A1A2E" }}>{user.name}</p>
-                                <p className="md:hidden" style={{ fontSize: "0.75rem", color: "#9090A8" }}>{user.email}</p>
+                                <p style={{ fontSize: "0.875rem", fontWeight: 600, color: "#1A1A2E" }}>{user.name || "Unknown user"}</p>
+                                <p className="md:hidden" style={{ fontSize: "0.75rem", color: "#9090A8" }}>{user.email || "No email"}</p>
                               </div>
                             </div>
                           </td>
                           <td className="px-4 py-4 hidden md:table-cell" style={{ fontSize: "0.875rem", color: "#6B6B8A" }}>
-                            {user.email}
+                            {user.email || "No email"}
                           </td>
                           <td className="px-4 py-4">
                             <span className="px-2.5 py-1 rounded-full" style={{ fontSize: "0.75rem", fontWeight: 600, color: role.color, background: role.bg }}>
-                              {user.role}
+                              {user.role || "User"}
                             </span>
                           </td>
                           <td className="px-4 py-4 hidden lg:table-cell">

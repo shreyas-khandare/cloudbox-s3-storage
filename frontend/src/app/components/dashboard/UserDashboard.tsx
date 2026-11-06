@@ -107,6 +107,11 @@ export function UserDashboard({ navigate }: Props) {
     file: File
   ) => {
 
+    if (file.size > 50 * 1024 * 1024) {
+      alert("File size must not exceed 50 MB");
+      return;
+    }
+
     try {
 
       setUploadProgress({
@@ -132,19 +137,30 @@ export function UserDashboard({ navigate }: Props) {
       });
 
 
-      await fetch(
-        urlRes.data.uploadUrl,
-        {
-          method: "PUT",
 
-          headers: {
-            "Content-Type": file.type
-          },
+      const formData = new FormData();
 
-          body: file
+      Object.entries(urlRes.data.fields).forEach(
+        ([key, value]) => {
+          formData.append(key, value as string);
         }
       );
 
+      formData.append("file", file);
+
+      const uploadRes = await fetch(
+        urlRes.data.uploadUrl,
+        {
+          method: "POST",
+          body: formData
+        }
+      );
+
+      if (!uploadRes.ok) {
+        throw new Error(
+          `S3 upload failed: ${uploadRes.status} ${uploadRes.statusText}`
+        );
+      }
 
       setUploadProgress({
         name: file.name,
@@ -274,38 +290,25 @@ export function UserDashboard({ navigate }: Props) {
 
   };
 
-  const previewFile = async (
-    id: string
-  ) => {
 
-    try {
+  const previewFile = async (id: string) => {
+    const previewWindow = window.open("about:blank", "_blank");
 
-      const res =
-        await api.get(
-          `/files/${id}/preview`
-        );
-
-
-      window.open(
-        res.data.previewUrl,
-        "_blank"
-      );
-
-
-    } catch (error) {
-
-      console.log(
-        error
-      );
-
-
-      alert(
-        "Preview failed"
-      );
-
+    if (!previewWindow) {
+      alert("Please allow popups to preview files.");
+      return;
     }
 
+    try {
+      const res = await api.get(`/files/${id}/preview`);
+      previewWindow.location.href = res.data.previewUrl;
+    } catch (error) {
+      console.error("Preview failed:", error);
+      previewWindow.close();
+      alert("Preview failed");
+    }
   };
+
 
   const getFileCategory = (
     type: string

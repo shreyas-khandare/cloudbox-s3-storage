@@ -10,14 +10,18 @@ interface Props {
 }
 
 export function RegisterPage({ navigate }: Props) {
-  const { setUser } = useAuth();
-  const { googleLogin } = useAuth();
+  const { setUser, googleLogin } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [otp, setOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [verifyLoading, setVerifyLoading] = useState(false);
 
   const strength = password.length === 0 ? 0
     : password.length < 6 ? 1
@@ -27,64 +31,112 @@ export function RegisterPage({ navigate }: Props) {
   const strengthLabel = ["", "Weak", "Fair", "Good", "Strong"];
   const strengthColor = ["", "#EF4444", "#F59E0B", "#10B981", "#059669"];
 
-  const handleSubmit = async (
-    e: React.FormEvent
-  ) => {
-
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
     setError("");
 
+    const trimmedName = name.trim();
+    const normalizedEmail = email.trim().toLowerCase();
 
-    if (!name || !email || !password) {
-
-      setError(
-        "Please fill in all fields."
-      );
-
+    if (!trimmedName || !normalizedEmail || !password) {
+      setError("Please fill in all fields.");
       return;
-
     }
 
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters long.");
+      return;
+    }
+
+    if (!emailVerified) {
+      setError("Please verify your email before creating an account.");
+      return;
+    }
 
     try {
-
       setLoading(true);
 
+      await api.post("/auth/register", {
+        name: trimmedName,
+        email: normalizedEmail,
+        password,
+      });
 
-      const res = await api.post(
-        "/auth/register",
-        {
-          name,
-          email,
-          password
-        }
-      );
+      setUser(null);
+      navigate("login");
+    } catch (error: unknown) {
+      const message =
+        (error as {
+          response?: { data?: { message?: string } };
+        }).response?.data?.message ?? "Registration failed";
 
-      setUser(
-        res.data.user
-      );
-
-
-      navigate(
-        "dashboard"
-      );
-
-
-    } catch (error) {
-
-
-      setError(
-        "Registration failed"
-      );
-
-
+      setError(message);
     } finally {
-
       setLoading(false);
+    }
+  };
 
+  const handleSendOTP = async () => {
+    setError("");
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setError("Please enter a valid email address.");
+      return;
     }
 
+    try {
+      setOtpLoading(true);
+
+      await api.post("/auth/send-registration-otp", {
+        email: normalizedEmail,
+      });
+
+      setOtpSent(true);
+      setOtp("");
+      setEmailVerified(false);
+    } catch (error: unknown) {
+      const message =
+        (error as {
+          response?: { data?: { message?: string } };
+        }).response?.data?.message ?? "Unable to send OTP.";
+
+      setError(message);
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleVerifyOTP = async () => {
+    setError("");
+
+    if (!/^\d{6}$/.test(otp)) {
+      setError("Enter the six-digit OTP.");
+      return;
+    }
+
+    try {
+      setVerifyLoading(true);
+
+      await api.post("/auth/verify-registration-otp", {
+        email: email.trim().toLowerCase(),
+        otp,
+      });
+
+      setEmailVerified(true);
+    } catch (error: unknown) {
+      setEmailVerified(false);
+
+      const message =
+        (error as {
+          response?: { data?: { message?: string } };
+        }).response?.data?.message ?? "Invalid or expired OTP.";
+
+      setError(message);
+    } finally {
+      setVerifyLoading(false);
+    }
   };
 
   return (
@@ -215,17 +267,99 @@ export function RegisterPage({ navigate }: Props) {
             </div>
 
             <div>
-              <label className="block mb-1.5" style={{ fontSize: "0.875rem", fontWeight: 600, color: "#1A1A2E" }}>Email address</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                className="w-full px-4 py-3 rounded-xl border-2 outline-none transition-all"
-                style={{ background: "#F0F0FF", border: "2px solid transparent", fontSize: "0.9375rem", color: "#1A1A2E" }}
-                onFocus={(e) => (e.target.style.borderColor = "#3D38F5")}
-                onBlur={(e) => (e.target.style.borderColor = "transparent")}
-              />
+              <label
+                className="block mb-1.5"
+                style={{
+                  fontSize: "0.875rem",
+                  fontWeight: 600,
+                  color: "#1A1A2E",
+                }}
+              >
+                Email address
+              </label>
+
+              <div className="flex gap-2">
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setOtpSent(false);
+                    setEmailVerified(false);
+                    setOtp("");
+                  }}
+                  placeholder="you@example.com"
+                  className="min-w-0 flex-1 px-4 py-3 rounded-xl border-2 outline-none transition-all"
+                  style={{
+                    background: "#F0F0FF",
+                    border: "2px solid transparent",
+                    fontSize: "0.9375rem",
+                    color: "#1A1A2E",
+                  }}
+                  onFocus={(e) => (e.target.style.borderColor = "#3D38F5")}
+                  onBlur={(e) => (e.target.style.borderColor = "transparent")}
+                />
+
+                <button
+                  type="button"
+                  onClick={handleSendOTP}
+                  disabled={otpLoading || !email.trim()}
+                  className="px-3 py-2 rounded-xl text-white text-sm font-semibold disabled:opacity-50 accent-gradient"
+                >
+                  {otpLoading ? "Sending..." : otpSent ? "Resend OTP" : "Send OTP"}
+                </button>
+              </div>
+
+              {emailVerified && (
+                <p className="mt-2 text-sm text-green-700">
+                  Email verified successfully.
+                </p>
+              )}
+
+              {otpSent && !emailVerified && (
+                <div className="mt-3">
+                  <label
+                    className="block mb-1.5"
+                    style={{
+                      fontSize: "0.875rem",
+                      fontWeight: 600,
+                      color: "#1A1A2E",
+                    }}
+                  >
+                    Enter OTP
+                  </label>
+
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      value={otp}
+                      onChange={(e) =>
+                        setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))
+                      }
+                      placeholder="6-digit OTP"
+                      className="min-w-0 flex-1 px-4 py-3 rounded-xl border-2 outline-none"
+                      style={{
+                        background: "#F0F0FF",
+                        borderColor: "transparent",
+                        fontSize: "0.9375rem",
+                        color: "#1A1A2E",
+                      }}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={handleVerifyOTP}
+                      disabled={verifyLoading || !/^\d{6}$/.test(otp)}
+                      className="px-3 py-2 rounded-xl text-white text-sm font-semibold disabled:opacity-50 accent-gradient"
+                    >
+                      {verifyLoading ? "Verifying..." : "Verify OTP"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
@@ -235,7 +369,7 @@ export function RegisterPage({ navigate }: Props) {
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Create a strong password"
+                  placeholder="Create a strong password At least 8 characters"
                   className="w-full px-4 py-3 pr-12 rounded-xl border-2 outline-none transition-all"
                   style={{ background: "#F0F0FF", border: "2px solid transparent", fontSize: "0.9375rem", color: "#1A1A2E" }}
                   onFocus={(e) => (e.target.style.borderColor = "#3D38F5")}
@@ -264,7 +398,7 @@ export function RegisterPage({ navigate }: Props) {
               )}
             </div>
 
-            <button type="submit" disabled={loading}
+            <button type="submit" disabled={loading || !name.trim() || !emailVerified || password.length < 8}
               className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-white font-semibold text-sm transition-all hover:opacity-90 hover:shadow-lg hover:shadow-[#3D38F5]/30 disabled:opacity-60 accent-gradient">
               {loading ? (
                 <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
