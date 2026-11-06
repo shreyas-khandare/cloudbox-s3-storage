@@ -17,7 +17,7 @@ const setSessionCookie = (
   res.cookie("token", token, {
     httpOnly: true,
     secure: env.NODE_ENV === "production",
-    sameSite: "lax",
+    sameSite: "none",
     maxAge,
     path: "/",
   });
@@ -381,7 +381,7 @@ export const logout = async (
     res.clearCookie("token", {
       httpOnly: true,
       secure: env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: "none",
       path: "/",
     });
 
