@@ -14,6 +14,7 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173",
   "https://cloudbox-s3-storage.vercel.app",
+  "https://mycloudbox.vercel.app",
 ];
 
 app.use(
