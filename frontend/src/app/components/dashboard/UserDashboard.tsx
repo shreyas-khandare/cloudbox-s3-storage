@@ -8,9 +8,9 @@ import { api } from "../../../services/api";
 import { useAuth } from "../../../context/AuthContext";
 import {
   Cloud, FolderOpen, Clock, HardDrive, LogOut, Search,
-  Upload, Bell, Grid3X3, List, Download, Trash2,
+  Upload, Grid3X3, List, Download, Trash2,
   FileText, Image, Film, Music, Archive, Plus,
-  ChevronDown, Check, Folder, Share2, Eye
+  Check, Folder, Eye
 } from "lucide-react";
 import type { Page } from "../../App";
 
@@ -24,9 +24,51 @@ type SubscriptionPlan = {
   maxFileSize: number;
 };
 
+type FileSort = "name" | "newest" | "oldest" | "largest" | "smallest";
+
 const MAX_SINGLE_UPLOAD_SIZE = 5 * 1024 * 1024 * 1024;
 const MEGABYTE = 1024 * 1024;
 const GIGABYTE = 1024 * MEGABYTE;
+
+const uploadToS3 = (
+  uploadUrl: string,
+  formData: FormData,
+  onProgress: (progress: number) => void
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+
+    request.open("POST", uploadUrl);
+
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    });
+
+    request.addEventListener("load", () => {
+      if (request.status >= 200 && request.status < 300) {
+        resolve();
+        return;
+      }
+
+      reject(
+        new Error(
+          `S3 upload failed: ${request.status} ${request.statusText}`.trim()
+        )
+      );
+    });
+
+    request.addEventListener("error", () => {
+      reject(new Error("Network error while uploading the file to S3."));
+    });
+
+    request.addEventListener("abort", () => {
+      reject(new Error("The S3 upload was cancelled."));
+    });
+
+    request.send(formData);
+  });
 
 type CloudFile = {
   id: string;
@@ -59,6 +101,7 @@ export function UserDashboard({ navigate }: Props) {
   const [files, setFiles] = useState<CloudFile[]>([]);
   const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>([]);
   const [activeNav, setActiveNav] = useState("files");
+  const [sortBy, setSortBy] = useState<FileSort>("newest");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [search, setSearch] = useState("");
   const [isDragging, setIsDragging] = useState(false);
@@ -106,20 +149,26 @@ export function UserDashboard({ navigate }: Props) {
   };
 
   const filteredFiles = files
-    .filter((f) =>
-      f.name
-        .toLowerCase()
-        .includes(
-          search.toLowerCase()
-        )
+    .filter((file) =>
+      file.name.toLowerCase().includes(search.toLowerCase())
     )
     .sort((a, b) => {
-      if (activeNav !== "recent")
-        return 0;
-      return (
-        new Date(b.createdAt).getTime() -
-        new Date(a.createdAt).getTime()
-      );
+      switch (sortBy) {
+        case "name":
+          return a.name.localeCompare(b.name, undefined, {
+            numeric: true,
+            sensitivity: "base",
+          });
+        case "oldest":
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case "largest":
+          return Number(b.size) - Number(a.size);
+        case "smallest":
+          return Number(a.size) - Number(b.size);
+        case "newest":
+        default:
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
     });
 
   const uploadFile = async (file: File) => {
@@ -137,86 +186,46 @@ export function UserDashboard({ navigate }: Props) {
     }
 
     try {
+      setUploadProgress({ name: file.name, progress: 2 });
 
-      setUploadProgress({
-        name: file.name,
-        progress: 20
+      const urlRes = await api.post("/files/upload-url", {
+        fileName: file.name,
+        fileType: contentType,
+        fileSize: file.size,
       });
 
-
-      const urlRes =
-        await api.post(
-          "/files/upload-url",
-          {
-            fileName: file.name,
-            fileType: contentType,
-            fileSize: file.size
-          }
-        );
-
-
-      setUploadProgress({
-        name: file.name,
-        progress: 50
-      });
-
-
+      setUploadProgress({ name: file.name, progress: 5 });
 
       const formData = new FormData();
-
-      Object.entries(urlRes.data.fields).forEach(
-        ([key, value]) => {
-          formData.append(key, value as string);
-        }
-      );
-
+      Object.entries(urlRes.data.fields).forEach(([key, value]) => {
+        formData.append(key, value as string);
+      });
       formData.append("file", file);
 
-      const uploadRes = await fetch(
+      await uploadToS3(
         urlRes.data.uploadUrl,
-        {
-          method: "POST",
-          body: formData
+        formData,
+        (uploadPercent) => {
+          // Reserve the final 10% for saving metadata and refreshing account data.
+          const progress = 5 + Math.round(uploadPercent * 0.85);
+          setUploadProgress({ name: file.name, progress });
         }
       );
 
-      if (!uploadRes.ok) {
-        throw new Error(
-          `S3 upload failed: ${uploadRes.status} ${uploadRes.statusText}`
-        );
-      }
+      setUploadProgress({ name: file.name, progress: 92 });
 
-      setUploadProgress({
+      await api.post("/files/save", {
         name: file.name,
-        progress: 80
+        type: contentType,
+        size: file.size,
+        s3Key: urlRes.data.key,
       });
 
-
-      await api.post(
-        "/files/save",
-        {
-          name: file.name,
-          type: contentType,
-          size: file.size,
-          s3Key: urlRes.data.key
-        }
-      );
-
-
+      setUploadProgress({ name: file.name, progress: 97 });
       await Promise.all([fetchFiles(), refreshUser()]);
 
-      setUploadProgress({
-        name: file.name,
-        progress: 100
-      });
-
-
-      setTimeout(
-        () => setUploadProgress(null),
-        800
-      );
-
-
+      setUploadProgress({ name: file.name, progress: 100 });
+      setTimeout(() => setUploadProgress(null), 1000);
     } catch (error) {
       console.error("Upload failed:", error);
       setUploadProgress(null);
@@ -413,9 +422,9 @@ export function UserDashboard({ navigate }: Props) {
           <div className="h-1.5 rounded-full mb-3" style={{ background: "rgba(255,255,255,0.1)" }}>
             <div className="h-full rounded-full accent-gradient transition-all" style={{ width: `${usedPct}%` }} />
           </div>
-          <button onClick={() => navigate("register")}
+          <button onClick={() => navigate("landing")}
             className="w-full py-2 rounded-lg text-white text-xs font-semibold transition-opacity hover:opacity-80 accent-gradient">
-            Upgrade to Pro
+            View plans
           </button>
         </div>
 
@@ -490,11 +499,6 @@ export function UserDashboard({ navigate }: Props) {
               </button>
             )}
 
-            <button className="relative p-2 rounded-xl hover:bg-[#EEF0FF] transition-colors">
-              <Bell className="w-5 h-5 text-[#6B6B8A]" />
-              <div className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#3D38F5]" />
-            </button>
-
             <button
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold accent-gradient hover:opacity-90 shadow-md shadow-[#3D38F5]/20 transition-all">
@@ -518,7 +522,13 @@ export function UserDashboard({ navigate }: Props) {
                 <div className="flex items-center gap-2">
                   <Upload className="w-4 h-4 text-[#3D38F5]" />
                   <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#1A1A2E" }}>
-                    {uploadProgress.progress < 100 ? "Uploading…" : "Upload complete!"}
+                    {uploadProgress.progress === 100
+                      ? "Upload complete!"
+                      : uploadProgress.progress >= 92
+                        ? "Saving file…"
+                        : uploadProgress.progress <= 5
+                          ? "Preparing upload…"
+                          : "Uploading to S3…"}
                   </span>
                 </div>
                 {uploadProgress.progress < 100
@@ -536,11 +546,11 @@ export function UserDashboard({ navigate }: Props) {
           )}
 
           {/* Stats row */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
             {[
               { label: "Total Files", value: String(files.length), icon: FolderOpen, color: "#3D38F5", bg: "#EEF0FF" },
-              { label: "Storage Used", value: `${formatSize(usedBytes)}`, icon: HardDrive, color: "#8B5CF6", bg: "#F5F3FF" },
-              { label: "Shared", value: "0", icon: Share2, color: "#10B981", bg: "#ECFDF5" },
+              { label: "Storage Used", value: formatSize(usedBytes), icon: HardDrive, color: "#8B5CF6", bg: "#F5F3FF" },
+              { label: "Current Plan", value: user?.plan ?? "FREE", icon: Cloud, color: "#10B981", bg: "#ECFDF5" },
             ].map((stat) => (
               <div key={stat.label} className="p-4 rounded-2xl border border-[#E8E8F0] hover:border-[#3D38F5]/20 transition-all"
                 style={{ background: "#fff" }}>
@@ -645,10 +655,21 @@ export function UserDashboard({ navigate }: Props) {
                 style={{ background: viewMode === "list" ? "#EEF0FF" : "transparent", color: viewMode === "list" ? "#3D38F5" : "#9090A8" }}>
                 <List className="w-4 h-4" />
               </button>
-              <button className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[#E8E8F0] hover:border-[#3D38F5]/30 transition-all text-sm"
-                style={{ color: "#6B6B8A", background: "#fff" }}>
-                Name <ChevronDown className="w-3.5 h-3.5" />
-              </button>
+              <label className="flex items-center gap-2 text-sm text-[#6B6B8A]">
+                <span className="hidden sm:inline">Sort by</span>
+                <select
+                  value={sortBy}
+                  onChange={(event) => setSortBy(event.target.value as FileSort)}
+                  aria-label="Sort files"
+                  className="px-3 py-2 rounded-xl border border-[#E8E8F0] bg-white outline-none hover:border-[#3D38F5]/30 focus:border-[#3D38F5] transition-all"
+                >
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="name">Name (A–Z)</option>
+                  <option value="largest">Largest</option>
+                  <option value="smallest">Smallest</option>
+                </select>
+              </label>
             </div>
           </div>
 
