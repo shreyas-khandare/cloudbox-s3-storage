@@ -1,5 +1,5 @@
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { api } from "../services/api";
 
 type User = {
@@ -7,6 +7,7 @@ type User = {
   name: string;
   email: string;
   role: "USER" | "ADMIN";
+  plan: "FREE" | "PRO" | "BUSINESS";
   storageUsed: string;
   storageLimit: string;
 };
@@ -15,6 +16,7 @@ type AuthContextType = {
   user: User | null;
   loading: boolean;
   setUser: (user: User | null) => void;
+  refreshUser: () => Promise<User | null>;
   logout: () => Promise<void>;
   googleLogin: (token: string) => Promise<User>;
 };
@@ -25,20 +27,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const refreshUser = useCallback(async (): Promise<User | null> => {
+    try {
+      const res = await api.get("/auth/me");
+      const nextUser = res.data.user as User;
+      setUser(nextUser);
+      return nextUser;
+    } catch {
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     const checkAuth = async () => {
-      try {
-        const res = await api.get("/auth/me");
-        setUser(res.data.user);
-      } catch {
+      const currentUser = await refreshUser();
+      if (!currentUser) {
         setUser(null);
-      } finally {
-        setLoading(false);
       }
+      setLoading(false);
     };
 
     void checkAuth();
-  }, []);
+  }, [refreshUser]);
 
   const logout = async (): Promise<void> => {
     try {
@@ -55,7 +65,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, setUser, logout, googleLogin }}>
+    <AuthContext.Provider value={{ user, loading, setUser, refreshUser, logout, googleLogin }}>
       {children}
     </AuthContext.Provider>
   );
