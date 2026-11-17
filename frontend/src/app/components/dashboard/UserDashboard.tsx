@@ -1,7 +1,8 @@
 import {
   useState,
   useRef,
-  useEffect
+  useEffect,
+  useCallback,
 } from "react";
 import { api } from "../../../services/api";
 import { useAuth } from "../../../context/AuthContext";
@@ -65,22 +66,16 @@ export function UserDashboard({ navigate }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    void fetchFiles();
-    void fetchSubscriptionPlans();
-  }, []);
-
-
-  const fetchFiles = async (): Promise<void> => {
+  const fetchFiles = useCallback(async (): Promise<void> => {
     try {
       const res = await api.get("/files");
       setFiles(res.data.files);
     } catch (error) {
       console.error("Failed to fetch files:", error);
     }
-  };
+  }, []);
 
-  const fetchSubscriptionPlans = async (): Promise<void> => {
+  const fetchSubscriptionPlans = useCallback(async (): Promise<void> => {
     try {
       const res = await api.get("/subscriptions/plans");
       setSubscriptionPlans(res.data.data);
@@ -88,7 +83,12 @@ export function UserDashboard({ navigate }: Props) {
       // The backend still validates every upload; this only affects early UI guidance.
       console.error("Failed to fetch subscription plans:", error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void fetchFiles();
+    void fetchSubscriptionPlans();
+  }, [fetchFiles, fetchSubscriptionPlans]);
 
   const getErrorMessage = (error: unknown, fallback: string): string => {
     if (typeof error === "object" && error !== null && "response" in error) {
