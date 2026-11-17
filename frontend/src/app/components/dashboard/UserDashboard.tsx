@@ -127,7 +127,7 @@ export function UserDashboard({ navigate }: Props) {
     const effectiveFileLimit = Math.min(planLimit ?? MAX_SINGLE_UPLOAD_SIZE, MAX_SINGLE_UPLOAD_SIZE);
 
     if (file.size > effectiveFileLimit) {
-      const limitLabel = formatSize(String(effectiveFileLimit));
+      const limitLabel = formatUploadLimit(effectiveFileLimit);
       const limitMessage = effectiveFileLimit >= MAX_SINGLE_UPLOAD_SIZE
         ? `Your current upload limit is ${limitLabel}. Files larger than 5 GB require multipart upload, which is not available yet.`
         : `Your ${user?.plan ?? "current"} plan supports files up to ${limitLabel} per file.`;
@@ -355,6 +355,9 @@ export function UserDashboard({ navigate }: Props) {
     if (size >= 1024) return `${(size / 1024).toFixed(2)} KB`;
     return `${size} bytes`;
   };
+
+  const formatUploadLimit = (bytes: number): string =>
+    bytes === MAX_SINGLE_UPLOAD_SIZE ? "5 GB" : formatSize(bytes);
 
   const usedBytes = Number(user?.storageUsed || 0);
   const totalBytes = Number(user?.storageLimit || GIGABYTE);
@@ -610,7 +613,7 @@ export function UserDashboard({ navigate }: Props) {
             </p>
             {planMaxFileSize !== undefined && (
               <p style={{ fontSize: "0.75rem", color: "#9090A8", marginBottom: "12px" }}>
-                Maximum file size on your {user?.plan ?? "current"} plan: {formatSize(planMaxFileSize)}
+                Maximum file size on your {user?.plan ?? "current"} plan: {formatUploadLimit(planMaxFileSize)}
               </p>
             )}
             <button
