@@ -7,6 +7,8 @@ import cookieParser from "cookie-parser";
 import authRoutes from "./routes/auth.routes";
 import adminRoutes from "./routes/admin.routes";
 import fileRoutes from "./routes/file.routes";
+import subscriptionRoutes from "./routes/subscription.routes";
+import razorpayWebhookRoutes from "./routes/razorpay-webhook.routes";
 import { errorHandler } from "./middlewares/error.middleware";
 
 const app = express();
@@ -30,6 +32,8 @@ app.use(
   })
 );
 
+app.use("/api/webhooks/razorpay", razorpayWebhookRoutes);
+
 app.use(express.json());
 
 app.use(
@@ -50,6 +54,7 @@ app.get("/", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/files", fileRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
 
 app.use(errorHandler);
 

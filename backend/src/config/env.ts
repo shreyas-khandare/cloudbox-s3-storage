@@ -14,6 +14,8 @@ const requiredEnv = [
   "GOOGLE_CLIENT_SECRET",
   "RESEND_API_KEY",
   "EMAIL_FROM",
+  "RAZORPAY_KEY_ID",
+  "RAZORPAY_KEY_SECRET",
 ];
 
 requiredEnv.forEach((key) => {
@@ -44,5 +46,15 @@ export const env = {
     ACCESS_KEY: process.env.AWS_ACCESS_KEY_ID!,
     SECRET_KEY: process.env.AWS_SECRET_ACCESS_KEY!,
     BUCKET: process.env.AWS_BUCKET_NAME!,
+  },
+
+  RAZORPAY: {
+    KEY_ID: process.env.RAZORPAY_KEY_ID!,
+    KEY_SECRET: process.env.RAZORPAY_KEY_SECRET!,
+    WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET,
+    PLANS: {
+      PRO: process.env.RAZORPAY_PRO_PLAN_ID!,
+      BUSINESS: process.env.RAZORPAY_BUSINESS_PLAN_ID!,
+    },
   },
 };

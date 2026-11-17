@@ -17,6 +17,38 @@ enum Provider {
   GOOGLE
 }
 
+enum Plan {
+  FREE
+  PRO
+  BUSINESS
+}
+
+enum SubscriptionStatus {
+  FREE
+  CREATED
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+  HALTED
+}
+
+enum PaymentStatus {
+  CREATED
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum WebhookStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
 model User {
   id       String   @id @default(uuid())
   name     String
@@ -28,11 +60,21 @@ model User {
 
   emailVerified Boolean @default(false)
 
+  // Storage
   storageUsed  BigInt @default(0)
   storageLimit BigInt @default(1073741824)
 
-  files    File[]
-  sessions Session[]
+  // Subscription
+  plan               Plan               @default(FREE)
+  subscriptionStatus SubscriptionStatus @default(FREE)
+  currentPeriodEnd   DateTime?
+  gracePeriodEnd     DateTime?
+
+  // Relationships
+  files         File[]
+  sessions      Session[]
+  subscriptions Subscription[]
+  payments      Payment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -68,15 +110,108 @@ model Session {
 }
 
 model EmailVerificationOTP {
-  id         String    @id @default(uuid())
-  email      String
-  codeHash   String
-  expiresAt  DateTime
-  attempts   Int       @default(0)
-  verifiedAt DateTime?
+  id                         String    @id @default(uuid())
+  email                      String
+  codeHash                   String
+  expiresAt                  DateTime
+  attempts                   Int       @default(0)
+  verifiedAt                 DateTime?
   registrationGrantExpiresAt DateTime?
-  createdAt  DateTime  @default(now())
+  createdAt                  DateTime  @default(now())
 
   @@index([email])
   @@index([expiresAt])
+}
+
+model Subscription {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  plan Plan
+
+  // Razorpay references
+  razorpayPlanId         String
+  razorpaySubscriptionId String @unique
+
+  status SubscriptionStatus @default(CREATED)
+
+  // Billing period
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+
+  // Subscription lifecycle
+  startDate         DateTime?
+  endDate           DateTime?
+  cancelledAt       DateTime?
+  cancelAtPeriodEnd Boolean   @default(false)
+
+  // Payment recovery
+  gracePeriodEnd DateTime?
+
+  payments Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([currentPeriodEnd])
+}
+
+model Payment {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  // Razorpay payment reference
+  razorpayPaymentId String? @unique
+
+  // Amount stored in paise (₹149 = 14900)
+  amount   Int
+  currency String @default("INR")
+
+  status PaymentStatus
+
+  paidAt        DateTime?
+  failureReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([subscriptionId])
+  @@index([status])
+}
+
+model RazorpayWebhookEvent {
+  id String @id @default(uuid())
+
+  // Razorpay event identification
+  eventId   String @unique
+  eventType String
+
+  razorpaySubscriptionId String?
+
+  // Original webhook payload
+  payload Json
+
+  // Processing status
+  status WebhookStatus @default(PENDING)
+
+  responseMessage String?
+  receivedAt      DateTime  @default(now())
+  processedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([eventType])
+  @@index([status])
+  @@index([receivedAt])
+  @@index([razorpaySubscriptionId])
 }

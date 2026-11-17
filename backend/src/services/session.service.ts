@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import prisma from "../config/prisma";
+import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
 
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -9,17 +10,56 @@ const hashSessionToken = (token: string): string => {
 };
 
 // create a new session the raw token is returned to the caller so it can be sent to the browser in http-only cookie
-export const createSession = async (userId: string) =>{
+export const createSession = async (userId: string) => {
     const token = randomBytes(32).toString("hex");
     const tokenHash = hashSessionToken(token);
     const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
 
-    await prisma.session.create({
-        data:{
-            tokenHash,
-            userId,
-            expiresAt,
-        },
+    const result = await prisma.$transaction(async (tx) => {
+        // Get the user's current plan.
+        const user = await tx.user.findUnique({
+            where: { id: userId },
+            select: { plan: true },
+        });
+
+        if (!user) {
+            throw new Error("USER_NOT_FOUND");
+        }
+
+        const planConfig = SUBSCRIPTION_PLANS[user.plan];
+
+        // Serialize concurrent session creation for this user.
+        await tx.$executeRaw`
+            SELECT pg_advisory_xact_lock(hashtext(${userId}))
+        `;
+
+        // Remove expired sessions.
+        await tx.session.deleteMany({
+            where: {
+                userId,
+                expiresAt: { lte: new Date() },
+            },
+        });
+
+        // Count active sessions.
+        const activeSessions = await tx.session.count({
+            where: { userId },
+        });
+
+        if (activeSessions >= planConfig.deviceLimit) {
+            throw new Error("DEVICE_LIMIT_REACHED");
+        }
+
+        // Create the new session.
+        await tx.session.create({
+            data: {
+                tokenHash,
+                userId,
+                expiresAt,
+            },
+        });
+
+        return true;
     });
 
     return {
@@ -28,7 +68,6 @@ export const createSession = async (userId: string) =>{
         maxAge: SESSION_DURATION_MS,
     };
 };
-
 
 //finding a valid session from the raw cookie token expired sessions are rejected and removed.
 export const findValidSession = async(token: string) => {
@@ -60,7 +99,3 @@ export const revokeSession = async (token: string) => {
         where: { tokenHash },
     });
 };
-
-
-
-

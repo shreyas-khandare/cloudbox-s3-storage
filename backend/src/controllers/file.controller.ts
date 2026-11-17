@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import prisma from "../config/prisma";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env";
+import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
 
 import {
     PutObjectCommand,
@@ -26,10 +27,21 @@ export const generateUploadUrl = async (
         const { fileName, fileType, fileSize } = req.body;
         const userId = (req as any).user.id;
 
+        // Validate file size
+        if (!Number.isSafeInteger(fileSize) || fileSize <= 0) {
+            return res.status(400).json({
+                message: "Invalid file size",
+            });
+        }
+
         // Get user storage details
         const user = await prisma.user.findUnique({
-            where: {
-                id: userId,
+            where: { id: userId },
+            select: {
+                id: true,
+                plan: true,
+                storageUsed: true,
+                storageLimit: true,
             },
         });
 
@@ -39,11 +51,24 @@ export const generateUploadUrl = async (
             });
         }
 
-        // Check storage limit
-        const newStorage = user.storageUsed + BigInt(fileSize);
+        // Get the user's plan limits
+        const planConfig = SUBSCRIPTION_PLANS[user.plan];
 
-        if (newStorage > user.storageLimit) {
-            return res.status(400).json({
+        // Enforce plan-specific maximum file size
+        if (fileSize > planConfig.maxFileSize) {
+            return res.status(413).json({
+                message: `Your ${planConfig.name} plan allows a maximum file size of ${
+                    planConfig.maxFileSize / (1024 * 1024)
+                } MB`,
+            });
+        }
+
+        // Check remaining storage
+        const availableStorage = user.storageLimit - user.storageUsed;
+        const requestedFileSize = BigInt(fileSize);
+
+        if (availableStorage <= 0n || requestedFileSize > availableStorage) {
+            return res.status(409).json({
                 message: "Storage limit exceeded",
             });
         }
@@ -57,7 +82,7 @@ export const generateUploadUrl = async (
         // Generate a unique S3 key
         const key = `users/${userId}/${randomUUID()}-${safeFileName}`;
 
-        // Generate presigned POST
+        // Generate presigned POST with an exact file-size restriction
         const { url, fields } = await createPresignedPost(s3, {
             Bucket: env.AWS.BUCKET!,
             Key: key,
@@ -66,7 +91,7 @@ export const generateUploadUrl = async (
                 "Content-Type": fileType,
             },
             Conditions: [
-                ["content-length-range", 1, 50 * 1024 * 1024],
+                ["content-length-range", fileSize, fileSize],
                 ["eq", "$Content-Type", fileType],
             ],
         });
@@ -85,27 +110,49 @@ export const generateUploadUrl = async (
     }
 };
 
-
 // Save file metadata
 export const saveFile = async (
     req: Request,
     res: Response
 ) => {
     const userId = (req as any).user.id;
-    let s3Key: string | undefined;
+    const s3Key = req.body.s3Key as string;
 
     try {
         const { name, type, size } = req.body;
-        s3Key = req.body.s3Key;
 
-        const expectedPrefix = `users/${userId}/`;
+        if (!Number.isSafeInteger(size) || size <= 0) {
+            return res.status(400).json({
+                message: "Invalid file size",
+            });
+        }
 
         if (
             typeof s3Key !== "string" ||
-            !s3Key.startsWith(expectedPrefix)
+            !s3Key.startsWith(`users/${userId}/`)
         ) {
             return res.status(403).json({
                 message: "Invalid file key",
+            });
+        }
+
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { plan: true },
+        });
+
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found",
+            });
+        }
+
+        const planConfig = SUBSCRIPTION_PLANS[user.plan];
+        const fileSize = BigInt(size);
+
+        if (size > planConfig.maxFileSize) {
+            return res.status(413).json({
+                message: "File exceeds your plan's maximum file size",
             });
         }
 
@@ -132,29 +179,28 @@ export const saveFile = async (
         }
 
         const file = await prisma.$transaction(async (tx) => {
-            const createdFile = await tx.file.create({
+            const quotaUpdated = await tx.$executeRaw`
+                UPDATE "User"
+                SET "storageUsed" = "storageUsed" + ${fileSize}
+                WHERE "id" = ${userId}
+                  AND "plan" = ${user.plan}::"Plan"
+                  AND "storageUsed" + ${fileSize} <= "storageLimit"
+            `;
+
+            if (quotaUpdated !== 1) {
+                throw new Error("STORAGE_LIMIT_EXCEEDED");
+            }
+
+            return tx.file.create({
                 data: {
                     name,
                     type,
-                    size,
-                    s3Key: s3Key!,
+                    size: fileSize,
+                    s3Key,
                     url: `https://${env.AWS.BUCKET}.s3.${env.AWS.REGION}.amazonaws.com/${s3Key}`,
                     userId,
                 },
             });
-
-            await tx.user.update({
-                where: {
-                    id: userId,
-                },
-                data: {
-                    storageUsed: {
-                        increment: size,
-                    },
-                },
-            });
-
-            return createdFile;
         });
 
         return res.status(201).json({
@@ -164,23 +210,17 @@ export const saveFile = async (
                 size: file.size.toString(),
             },
         });
+
     } catch (error) {
         console.error("Save File Error:", error);
 
         if (
-            typeof s3Key === "string" &&
-            s3Key.startsWith(`users/${userId}/`)
+            error instanceof Error &&
+            error.message === "STORAGE_LIMIT_EXCEEDED"
         ) {
-            try {
-                await s3.send(
-                    new DeleteObjectCommand({
-                        Bucket: env.AWS.BUCKET,
-                        Key: s3Key,
-                    })
-                );
-            } catch (cleanupError) {
-                console.error("S3 Cleanup Error:", cleanupError);
-            }
+            return res.status(409).json({
+                message: "Storage limit exceeded",
+            });
         }
 
         return res.status(500).json({
@@ -375,7 +415,7 @@ export const deleteFile = async (
         const userId = (req as any).user.id;
         const id = req.params.id as string;
 
-        // Find file belonging to the logged-in user
+        // Find file belonging to the logged-in user.
         const file = await prisma.file.findFirst({
             where: {
                 id,
@@ -389,15 +429,28 @@ export const deleteFile = async (
             });
         }
 
-        // Delete metadata and update storage atomically
-        await prisma.$transaction([
-            prisma.file.delete({
+        // Delete the S3 object first.
+        await s3.send(
+            new DeleteObjectCommand({
+                Bucket: env.AWS.BUCKET,
+                Key: file.s3Key,
+            })
+        );
+
+        // Delete metadata and update storage atomically.
+        const deleted = await prisma.$transaction(async (tx) => {
+            const result = await tx.file.deleteMany({
                 where: {
                     id: file.id,
+                    userId,
                 },
-            }),
+            });
 
-            prisma.user.update({
+            if (result.count !== 1) {
+                return false;
+            }
+
+            await tx.user.update({
                 where: {
                     id: userId,
                 },
@@ -406,16 +459,16 @@ export const deleteFile = async (
                         decrement: file.size,
                     },
                 },
-            }),
-        ]);
+            });
 
-        // Delete actual object from AWS S3
-        await s3.send(
-            new DeleteObjectCommand({
-                Bucket: env.AWS.BUCKET,
-                Key: file.s3Key,
-            })
-        );
+            return true;
+        });
+
+        if (!deleted) {
+            return res.status(404).json({
+                message: "File not found",
+            });
+        }
 
         return res.status(200).json({
             success: true,
@@ -430,7 +483,6 @@ export const deleteFile = async (
         });
     }
 };
-
 
 //Preview File for specific user
 export const previewFile = async (

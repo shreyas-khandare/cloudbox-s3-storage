@@ -1,6 +1,7 @@
+
 import { z } from "zod";
 
-
+const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 
 export const uploadUrlSchema = z.object({
     fileName: z
@@ -21,10 +22,8 @@ export const uploadUrlSchema = z.object({
         .number()
         .int()
         .positive()
-        .max(50 * 1024 * 1024, "File size must not exceed 50 MB"),
+        .max(MAX_FILE_SIZE, "File size must not exceed 10 GB"),
 });
-
-
 
 export const saveFileSchema = z.object({
     name: z
@@ -41,7 +40,7 @@ export const saveFileSchema = z.object({
         .number()
         .int()
         .positive()
-        .max(50 * 1024 * 1024, "File size must not exceed 50 MB"),
+        .max(MAX_FILE_SIZE, "File size must not exceed 10 GB"),
 
     s3Key: z
         .string()

@@ -10,17 +10,19 @@ import { env } from "../config/env";
 const googleClient = new OAuth2Client(env.GOOGLE.CLIENT_ID);
 
 const setSessionCookie = (
-  res: Response,
-  token: string,
-  maxAge: number,
+    res: Response,
+    token: string,
+    maxAge: number,
 ) => {
-  res.cookie("token", token, {
-    httpOnly: true,
-    secure: env.NODE_ENV === "production",
-    sameSite: "none",
-    maxAge,
-    path: "/",
-  });
+    const isProduction = env.NODE_ENV === "production";
+
+    res.cookie("token", token, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: isProduction ? "none" : "lax",
+        maxAge,
+        path: "/",
+    });
 };
 
 const sendSafeUser = (res: Response, user: any, status = 200) => {
@@ -230,39 +232,70 @@ export const register = async (
 };
 
 export const login = async (req: Request, res: Response) => {
-  try {
-    const email =
-      typeof req.body.email === "string"
-        ? req.body.email.trim().toLowerCase()
-        : "";
-    const { password } = req.body;
+    try {
+        const email =
+            typeof req.body.email === "string"
+                ? req.body.email.trim().toLowerCase()
+                : "";
 
-    if (!email || typeof password !== "string") {
-      return res.status(400).json({
-        message: "Provide a valid email and password.",
-      });
+        const { password } = req.body;
+
+        if (!email || typeof password !== "string") {
+            return res.status(400).json({
+                message: "Provide a valid email and password.",
+            });
+        }
+
+        const user = await prisma.user.findUnique({
+            where: { email },
+        });
+
+        if (
+            !user?.password ||
+            !(await bcrypt.compare(password, user.password))
+        ) {
+            return res.status(401).json({
+                message: "Invalid credentials",
+            });
+        }
+
+        if (!user.emailVerified) {
+            return res.status(403).json({
+                message: "Please verify your email before logging in.",
+            });
+        }
+
+        const session = await createSession(user.id);
+
+        setSessionCookie(res, session.token, session.maxAge);
+
+        return sendSafeUser(res, user);
+
+    } catch (error) {
+        if (
+            error instanceof Error &&
+            error.message === "DEVICE_LIMIT_REACHED"
+        ) {
+            return res.status(409).json({
+                message: "You have reached your device limit. Please sign out from another device before logging in.",
+            });
+        }
+
+        if (
+            error instanceof Error &&
+            error.message === "USER_NOT_FOUND"
+        ) {
+            return res.status(404).json({
+                message: "User not found",
+            });
+        }
+
+        console.error("[Auth] Login failed:", error);
+
+        return res.status(500).json({
+            message: "Login failed",
+        });
     }
-
-    const user = await prisma.user.findUnique({ where: { email } });
-
-    if (!user?.password || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    if (!user.emailVerified) {
-      return res.status(403).json({
-        message: "Please verify your email before logging in.",
-      });
-    }
-
-    const session = await createSession(user.id);
-    setSessionCookie(res, session.token, session.maxAge);
-
-    return sendSafeUser(res, user);
-  } catch (error) {
-    console.error("[Auth] Login failed:", error);
-    return res.status(500).json({ message: "Login failed" });
-  }
 };
 
 // Retained for compatibility with any existing routes or clients.
@@ -395,54 +428,80 @@ export const logout = async (
 };
 
 export const googleLogin = async (req: Request, res: Response) => {
-  try {
-    const { token } = req.body;
+    try {
+        const { token } = req.body;
 
-    if (typeof token !== "string" || !token) {
-      return res.status(400).json({
-        message: "A valid Google credential is required.",
-      });
+        if (typeof token !== "string" || !token) {
+            return res.status(400).json({
+                message: "A valid Google credential is required.",
+            });
+        }
+
+        const ticket = await googleClient.verifyIdToken({
+            idToken: token,
+            audience: env.GOOGLE.CLIENT_ID,
+        });
+
+        const payload = ticket.getPayload();
+
+        if (!payload?.email || payload.email_verified !== true) {
+            return res.status(401).json({
+                message: "Google account email is not verified",
+            });
+        }
+
+        const email = payload.email.trim().toLowerCase();
+
+        let user = await prisma.user.findUnique({
+            where: { email },
+        });
+
+        if (!user) {
+            user = await prisma.user.create({
+                data: {
+                    name: payload.name || "",
+                    email,
+                    avatar: payload.picture,
+                    provider: "GOOGLE",
+                    emailVerified: true,
+                },
+            });
+        } else if (!user.emailVerified) {
+            user = await prisma.user.update({
+                where: { id: user.id },
+                data: { emailVerified: true },
+            });
+        }
+
+        const session = await createSession(user.id);
+
+        setSessionCookie(res, session.token, session.maxAge);
+
+        return sendSafeUser(res, user);
+
+    } catch (error) {
+        if (
+            error instanceof Error &&
+            error.message === "DEVICE_LIMIT_REACHED"
+        ) {
+            return res.status(409).json({
+                message: "You have reached your device limit. Please sign out from another device before logging in.",
+            });
+        }
+
+        if (
+            error instanceof Error &&
+            error.message === "USER_NOT_FOUND"
+        ) {
+            return res.status(404).json({
+                message: "User not found",
+            });
+        }
+
+        console.error("[Auth] Google login failed:", error);
+
+        return res.status(500).json({
+            message: "Google login failed",
+        });
     }
-
-    const ticket = await googleClient.verifyIdToken({
-      idToken: token,
-      audience: env.GOOGLE.CLIENT_ID,
-    });
-
-    const payload = ticket.getPayload();
-
-    if (!payload?.email || payload.email_verified !== true) {
-      return res.status(401).json({
-        message: "Google account email is not verified",
-      });
-    }
-
-    const email = payload.email.trim().toLowerCase();
-    let user = await prisma.user.findUnique({ where: { email } });
-
-    if (!user) {
-      user = await prisma.user.create({
-        data: {
-          name: payload.name || "",
-          email,
-          avatar: payload.picture,
-          provider: "GOOGLE",
-          emailVerified: true,
-        },
-      });
-    } else if (!user.emailVerified) {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: { emailVerified: true },
-      });
-    }
-
-    const session = await createSession(user.id);
-    setSessionCookie(res, session.token, session.maxAge);
-
-    return sendSafeUser(res, user);
-  } catch (error) {
-    console.error("[Auth] Google login failed:", error);
-    return res.status(500).json({ message: "Google login failed" });
-  }
 };
