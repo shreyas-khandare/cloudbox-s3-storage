@@ -128,7 +128,10 @@ export function UserDashboard({ navigate }: Props) {
 
     if (file.size > effectiveFileLimit) {
       const limitLabel = formatSize(String(effectiveFileLimit));
-      alert(`Your current upload limit is ${limitLabel}. Files larger than 5 GB require multipart upload, which is not available yet.`);
+      const limitMessage = effectiveFileLimit >= MAX_SINGLE_UPLOAD_SIZE
+        ? `Your current upload limit is ${limitLabel}. Files larger than 5 GB require multipart upload, which is not available yet.`
+        : `Your ${user?.plan ?? "current"} plan supports files up to ${limitLabel} per file.`;
+      alert(limitMessage);
       return;
     }
 
@@ -356,6 +359,7 @@ export function UserDashboard({ navigate }: Props) {
   const usedBytes = Number(user?.storageUsed || 0);
   const totalBytes = Number(user?.storageLimit || GIGABYTE);
   const usedPct = totalBytes > 0 ? Math.min((usedBytes / totalBytes) * 100, 100) : 0;
+  const planMaxFileSize = subscriptionPlans.find((plan) => plan.id === user?.plan)?.maxFileSize;
 
   return (
     <div className="flex h-screen overflow-hidden cloudbox-font-body" style={{ background: "#F4F4FF" }}>
@@ -604,6 +608,11 @@ export function UserDashboard({ navigate }: Props) {
             <p style={{ fontSize: "0.8125rem", color: "#6B6B8A", marginBottom: "12px" }}>
               or click to browse your computer
             </p>
+            {planMaxFileSize !== undefined && (
+              <p style={{ fontSize: "0.75rem", color: "#9090A8", marginBottom: "12px" }}>
+                Maximum file size on your {user?.plan ?? "current"} plan: {formatSize(planMaxFileSize)}
+              </p>
+            )}
             <button
               onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
               className="px-5 py-2 rounded-xl text-sm font-semibold transition-all hover:opacity-90 accent-gradient text-white">
