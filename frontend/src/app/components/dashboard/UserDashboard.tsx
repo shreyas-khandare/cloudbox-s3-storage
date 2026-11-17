@@ -506,7 +506,7 @@ export function UserDashboard({ navigate }: Props) {
               <span className="hidden sm:inline">Upload</span>
             </button>
 
-            <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold cursor-pointer accent-gradient">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold accent-gradient">
               {user?.name?.charAt(0)}
             </div>
           </div>
@@ -592,11 +592,7 @@ export function UserDashboard({ navigate }: Props) {
                 <div className="h-2 rounded-full" style={{ background: "rgba(255,255,255,0.2)" }}>
                   <div className="h-full rounded-full bg-white transition-all" style={{ width: `${usedPct}%` }} />
                 </div>
-                {/* <button onClick={() => navigate("register")}
-                  className="mt-3 w-full py-2 rounded-xl text-xs font-semibold text-[#3D38F5] hover:opacity-90 transition-opacity"
-                  style={{ background: "#fff" }}>
-                  Upgrade to Pro — 100 GB
-                </button> */}
+
               </div>
             </div>
           </div>
