@@ -17,6 +17,16 @@ interface Props {
   navigate: (page: Page) => void;
 }
 
+type SubscriptionPlan = {
+  id: "FREE" | "PRO" | "BUSINESS";
+  name: string;
+  maxFileSize: number;
+};
+
+const MAX_SINGLE_UPLOAD_SIZE = 5 * 1024 * 1024 * 1024;
+const MEGABYTE = 1024 * 1024;
+const GIGABYTE = 1024 * MEGABYTE;
+
 type CloudFile = {
   id: string;
   name: string;
@@ -44,8 +54,9 @@ const FILE_ICONS: Record<FileType | string, { icon: React.ElementType; color: st
 };
 
 export function UserDashboard({ navigate }: Props) {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const [files, setFiles] = useState<CloudFile[]>([]);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>([]);
   const [activeNav, setActiveNav] = useState("files");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [search, setSearch] = useState("");
@@ -55,35 +66,43 @@ export function UserDashboard({ navigate }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-
-    fetchFiles();
-
+    void fetchFiles();
+    void fetchSubscriptionPlans();
   }, []);
 
 
-  const fetchFiles = async () => {
-
+  const fetchFiles = async (): Promise<void> => {
     try {
-
-      const res =
-        await api.get(
-          "/files"
-        );
-
-
-      setFiles(
-        res.data.files
-      );
-
-
+      const res = await api.get("/files");
+      setFiles(res.data.files);
     } catch (error) {
+      console.error("Failed to fetch files:", error);
+    }
+  };
 
-      console.log(
-        error
-      );
+  const fetchSubscriptionPlans = async (): Promise<void> => {
+    try {
+      const res = await api.get("/subscriptions/plans");
+      setSubscriptionPlans(res.data.data);
+    } catch (error) {
+      // The backend still validates every upload; this only affects early UI guidance.
+      console.error("Failed to fetch subscription plans:", error);
+    }
+  };
 
+  const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (typeof error === "object" && error !== null && "response" in error) {
+      const response = (error as { response?: { data?: { message?: unknown } } }).response;
+      if (typeof response?.data?.message === "string") {
+        return response.data.message;
+      }
     }
 
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+
+    return fallback;
   };
 
   const filteredFiles = files
@@ -103,12 +122,13 @@ export function UserDashboard({ navigate }: Props) {
       );
     });
 
-  const uploadFile = async (
-    file: File
-  ) => {
+  const uploadFile = async (file: File) => {
+    const planLimit = subscriptionPlans.find((plan) => plan.id === user?.plan)?.maxFileSize;
+    const effectiveFileLimit = Math.min(planLimit ?? MAX_SINGLE_UPLOAD_SIZE, MAX_SINGLE_UPLOAD_SIZE);
 
-    if (file.size > 50 * 1024 * 1024) {
-      alert("File size must not exceed 50 MB");
+    if (file.size > effectiveFileLimit) {
+      const limitLabel = formatSize(String(effectiveFileLimit));
+      alert(`Your current upload limit is ${limitLabel}. Files larger than 5 GB require multipart upload, which is not available yet.`);
       return;
     }
 
@@ -179,8 +199,7 @@ export function UserDashboard({ navigate }: Props) {
       );
 
 
-      await fetchFiles();
-
+      await Promise.all([fetchFiles(), refreshUser()]);
 
       setUploadProgress({
         name: file.name,
@@ -195,15 +214,10 @@ export function UserDashboard({ navigate }: Props) {
 
 
     } catch (error) {
-
-      console.log(error);
+      console.error("Upload failed:", error);
       setUploadProgress(null);
-      alert(
-        "Upload failed"
-      );
-
+      alert(getErrorMessage(error, "Upload failed. Please try again."));
     }
-
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -239,21 +253,14 @@ export function UserDashboard({ navigate }: Props) {
       );
 
 
-      setFiles(
-        prev =>
-          prev.filter(
-            f => f.id !== id
-          )
-      );
+      setFiles((prev) => prev.filter((file) => file.id !== id));
+      await refreshUser();
 
 
     } catch (error) {
 
-      console.log(error);
-
-      alert(
-        "Delete failed"
-      );
+      console.error("Delete failed:", error);
+      alert(getErrorMessage(error, "Delete failed. Please try again."));
 
     }
 
@@ -337,23 +344,18 @@ export function UserDashboard({ navigate }: Props) {
 
   };
 
-  const formatSize = (bytes: string) => {
-    return (
-      Number(bytes)
-      /
-      1024
-      /
-      1024
-    ).toFixed(2)
-      + " MB";
+  const formatSize = (bytes: string | number): string => {
+    const size = Number(bytes);
+    if (!Number.isFinite(size) || size < 0) return "0 MB";
+    if (size >= GIGABYTE) return `${(size / GIGABYTE).toFixed(2)} GB`;
+    if (size >= MEGABYTE) return `${(size / MEGABYTE).toFixed(2)} MB`;
+    if (size >= 1024) return `${(size / 1024).toFixed(2)} KB`;
+    return `${size} bytes`;
   };
 
-
-  const usedBytes = Number(user?.storageUsed || 0) / (1024 * 1024);
-
-  const totalBytes = Number(user?.storageLimit || 1073741824) / (1024 * 1024);
-
-  const usedPct = Math.min((usedBytes / totalBytes) * 100, 100);
+  const usedBytes = Number(user?.storageUsed || 0);
+  const totalBytes = Number(user?.storageLimit || GIGABYTE);
+  const usedPct = totalBytes > 0 ? Math.min((usedBytes / totalBytes) * 100, 100) : 0;
 
   return (
     <div className="flex h-screen overflow-hidden cloudbox-font-body" style={{ background: "#F4F4FF" }}>
@@ -398,7 +400,7 @@ export function UserDashboard({ navigate }: Props) {
         <div className="mx-3 mb-3 p-4 rounded-xl" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
           <div className="flex justify-between items-center mb-2">
             <p style={{ fontSize: "0.75rem", fontWeight: 600, color: "#fff" }}>Storage</p>
-            <p style={{ fontSize: "0.6875rem", color: "rgba(255,255,255,0.4)" }}>{usedBytes.toFixed(2)} MB / {(totalBytes / 1024).toFixed(2)} GB</p>
+            <p style={{ fontSize: "0.6875rem", color: "rgba(255,255,255,0.4)" }}>{formatSize(usedBytes)} / {formatSize(totalBytes)}</p>
           </div>
           <div className="h-1.5 rounded-full mb-3" style={{ background: "rgba(255,255,255,0.1)" }}>
             <div className="h-full rounded-full accent-gradient transition-all" style={{ width: `${usedPct}%` }} />
@@ -529,7 +531,7 @@ export function UserDashboard({ navigate }: Props) {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {[
               { label: "Total Files", value: String(files.length), icon: FolderOpen, color: "#3D38F5", bg: "#EEF0FF" },
-              { label: "Storage Used", value: `${usedBytes.toFixed(2)} MB`, icon: HardDrive, color: "#8B5CF6", bg: "#F5F3FF" },
+              { label: "Storage Used", value: `${formatSize(usedBytes)}`, icon: HardDrive, color: "#8B5CF6", bg: "#F5F3FF" },
               { label: "Shared", value: "0", icon: Share2, color: "#10B981", bg: "#ECFDF5" },
             ].map((stat) => (
               <div key={stat.label} className="p-4 rounded-2xl border border-[#E8E8F0] hover:border-[#3D38F5]/20 transition-all"
@@ -558,16 +560,16 @@ export function UserDashboard({ navigate }: Props) {
                   Storage Usage
                 </p>
                 <p className="cloudbox-font-display" style={{ fontSize: "1.5rem", fontWeight: 800, color: "#fff", marginBottom: "2px" }}>
-                  {usedBytes.toFixed(2)} MB <span style={{ fontSize: "1rem", fontWeight: 500 }}>used of {(totalBytes / 1024).toFixed(2)} GB</span>
+                  {formatSize(usedBytes)} <span style={{ fontSize: "1rem", fontWeight: 500 }}>used of {formatSize(totalBytes)}</span>
                 </p>
                 <p style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.5)" }}>
-                  {((usedBytes / totalBytes) * 100).toFixed(0)}% of free tier used
+                  {usedPct.toFixed(0)}% of your storage used
                 </p>
               </div>
               <div className="sm:w-48 flex-shrink-0">
                 <div className="flex justify-between mb-1.5">
                   <span style={{ fontSize: "0.6875rem", color: "rgba(255,255,255,0.6)" }}>0 MB</span>
-                  <span style={{ fontSize: "0.6875rem", color: "rgba(255,255,255,0.6)" }}>{(totalBytes / 1024).toFixed(0)} GB</span>
+                  <span style={{ fontSize: "0.6875rem", color: "rgba(255,255,255,0.6)" }}>{formatSize(totalBytes)}</span>
                 </div>
                 <div className="h-2 rounded-full" style={{ background: "rgba(255,255,255,0.2)" }}>
                   <div className="h-full rounded-full bg-white transition-all" style={{ width: `${usedPct}%` }} />
