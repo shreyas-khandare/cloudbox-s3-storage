@@ -1,7 +1,8 @@
 
 import { z } from "zod";
+import { MAX_SINGLE_UPLOAD_SIZE } from "../config/upload";
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
+const MAX_FILE_SIZE = MAX_SINGLE_UPLOAD_SIZE; // 5 GB until multipart upload is available
 
 export const uploadUrlSchema = z.object({
     fileName: z
