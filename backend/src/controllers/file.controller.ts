@@ -3,6 +3,7 @@ import prisma from "../config/prisma";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
+import { MAX_SINGLE_UPLOAD_SIZE } from "../config/upload";
 
 import {
     PutObjectCommand,
@@ -17,8 +18,6 @@ import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 
 import { s3 } from "../config/s3";
 
-// A single S3 upload request is limited to 5 GB. Larger files need multipart upload.
-const MAX_SINGLE_UPLOAD_SIZE = 5_000_000_000;
 
 
 // Generate S3 upload URL
