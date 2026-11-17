@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { Plan, SubscriptionStatus } from "@prisma/client";
 import { createSubscription } from "../services/subscription.service";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
+import { MAX_SINGLE_UPLOAD_SIZE } from "../config/upload";
 import { cancelRazorpaySubscription } from "../services/razorpay.service";
 import prisma from "../config/prisma";
 
@@ -42,7 +43,7 @@ export const getSubscriptionPlansController = (
     price: plan.price,
     currency: plan.currency,
     storageLimit: plan.storageLimit.toString(),
-    maxFileSize: Math.min(plan.maxFileSize, 5_000_000_000),
+    maxFileSize: Math.min(plan.maxFileSize, MAX_SINGLE_UPLOAD_SIZE),
     deviceLimit: plan.deviceLimit,
   }));
 
