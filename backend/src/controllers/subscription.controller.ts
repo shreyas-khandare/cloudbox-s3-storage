@@ -42,7 +42,7 @@ export const getSubscriptionPlansController = (
     price: plan.price,
     currency: plan.currency,
     storageLimit: plan.storageLimit.toString(),
-    maxFileSize: plan.maxFileSize,
+    maxFileSize: Math.min(plan.maxFileSize, 5_000_000_000),
     deviceLimit: plan.deviceLimit,
   }));
 
