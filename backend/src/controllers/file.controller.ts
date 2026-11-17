@@ -17,6 +17,9 @@ import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 
 import { s3 } from "../config/s3";
 
+// A single S3 upload request is limited to 5 GB. Larger files need multipart upload.
+const MAX_SINGLE_UPLOAD_SIZE = 5_000_000_000;
+
 
 // Generate S3 upload URL
 export const generateUploadUrl = async (
@@ -60,6 +63,12 @@ export const generateUploadUrl = async (
                 message: `Your ${planConfig.name} plan allows a maximum file size of ${
                     planConfig.maxFileSize / (1024 * 1024)
                 } MB`,
+            });
+        }
+
+        if (fileSize > MAX_SINGLE_UPLOAD_SIZE) {
+            return res.status(413).json({
+                message: "Files larger than 5 GB require multipart upload, which is not available yet.",
             });
         }
 
@@ -153,6 +162,12 @@ export const saveFile = async (
         if (size > planConfig.maxFileSize) {
             return res.status(413).json({
                 message: "File exceeds your plan's maximum file size",
+            });
+        }
+
+        if (size > MAX_SINGLE_UPLOAD_SIZE) {
+            return res.status(413).json({
+                message: "Files larger than 5 GB require multipart upload, which is not available yet.",
             });
         }
 
