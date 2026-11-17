@@ -123,6 +123,7 @@ export function UserDashboard({ navigate }: Props) {
     });
 
   const uploadFile = async (file: File) => {
+    const contentType = file.type || "application/octet-stream";
     const planLimit = subscriptionPlans.find((plan) => plan.id === user?.plan)?.maxFileSize;
     const effectiveFileLimit = Math.min(planLimit ?? MAX_SINGLE_UPLOAD_SIZE, MAX_SINGLE_UPLOAD_SIZE);
 
@@ -148,7 +149,7 @@ export function UserDashboard({ navigate }: Props) {
           "/files/upload-url",
           {
             fileName: file.name,
-            fileType: file.type,
+            fileType: contentType,
             fileSize: file.size
           }
         );
@@ -195,7 +196,7 @@ export function UserDashboard({ navigate }: Props) {
         "/files/save",
         {
           name: file.name,
-          type: file.type,
+          type: contentType,
           size: file.size,
           s3Key: urlRes.data.key
         }
