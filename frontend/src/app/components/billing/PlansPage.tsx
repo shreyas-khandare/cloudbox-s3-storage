@@ -77,19 +77,21 @@ export function PlansPage({ navigate }: Props) {
   const [notice, setNotice] = useState("");
   const pollCount = useRef(0);
 
+  const userId = user?.id;
+
   const loadData = useCallback(async () => {
     const plansRequest = api.get("/subscriptions/plans");
-    const accountRequest = user ? api.get("/subscriptions/me") : Promise.resolve(null);
+    const accountRequest = userId ? api.get("/subscriptions/me") : Promise.resolve(null);
     const [plansResponse, accountResponse] = await Promise.all([plansRequest, accountRequest]);
 
     setPlans(plansResponse.data.data || []);
     if (accountResponse) setOverview(accountResponse.data.data);
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
     let mounted = true;
     setLoading(true);
-    loadData()
+    Promise.all([loadData(), userId ? refreshUser() : Promise.resolve(null)])
       .catch((loadError) => {
         if (mounted) setError(errorMessage(loadError));
       })
@@ -97,7 +99,7 @@ export function PlansPage({ navigate }: Props) {
         if (mounted) setLoading(false);
       });
     return () => { mounted = false; };
-  }, [loadData]);
+  }, [loadData, userId, refreshUser]);
 
   const pendingSubscription = overview?.currentSubscription ?? null;
   const hasActiveOrPendingSubscription = Boolean(
@@ -235,7 +237,7 @@ export function PlansPage({ navigate }: Props) {
               <p className="font-semibold text-amber-900">Subscription status: {pendingSubscription.status.replace("_", " ")}</p>
               <p className="mt-1 text-sm text-amber-800">
                 {pendingSubscription.status === "CREATED"
-                  ? "Your subscription is awaiting payment authorization. Finish the Razorpay checkout you started, then refresh this status."
+                  ? "Your subscription is awaiting payment authorization. Complete the Razorpay checkout tab you opened earlier. If you closed it, do not create another subscription; check Billing before retrying."
                   : "Razorpay has reported a payment issue. Check your billing details or review your payment history."}
               </p>
             </div>
@@ -262,7 +264,7 @@ export function PlansPage({ navigate }: Props) {
         ) : (
           <div className="grid gap-5 lg:grid-cols-3">
             {plans.map((plan) => {
-              const current = user?.plan === plan.id;
+              const current = (overview?.plan ?? user?.plan) === plan.id;
               const paidPlan = plan.id !== "FREE";
               const isPendingPlan = pendingSubscription?.plan === plan.id && pendingSubscription.status === "CREATED";
               const isHighlighted = plan.id === "PRO" || selectedPlan === plan.id;
@@ -307,7 +309,7 @@ export function PlansPage({ navigate }: Props) {
                   {current ? (
                     <div className="rounded-xl bg-[#F0F0FF] px-4 py-3 text-center text-sm font-semibold text-[#3D38F5]">Your current plan</div>
                   ) : isPendingPlan ? (
-                    <button onClick={() => setNotice("Use the Razorpay checkout link shown above. If you no longer have it, refresh or contact support before creating another subscription.")} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">Payment pending</button>
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-sm font-semibold text-amber-800">Payment pending</div>
                   ) : paidPlan && hasActiveOrPendingSubscription ? (
                     <button onClick={() => navigate("billing")} className="rounded-xl border border-[#DCD9FF] px-4 py-3 text-sm font-semibold text-[#3D38F5]">Manage current subscription</button>
                   ) : plan.id === "FREE" ? (
@@ -321,7 +323,7 @@ export function PlansPage({ navigate }: Props) {
                       {actionPlan === plan.id ? <><LoaderCircle className="h-4 w-4 animate-spin" /> Creating subscription…</> : user ? `Choose ${plan.name}` : "Sign in to choose"}
                     </button>
                   )}
-                  {!user && paidPlan && <p className="mt-3 text-center text-xs text-[#8585A0]">New here? <Link to="/register" className="font-semibold text-[#3D38F5]">Create an account</Link></p>}
+                  {!user && paidPlan && <p className="mt-3 text-center text-xs text-[#8585A0]">New here? <button onClick={() => routerNavigate("/register", { state: { from: `/plans?selected=${plan.id}` } })} className="font-semibold text-[#3D38F5]">Create an account</button></p>}
                 </article>
               );
             })}
