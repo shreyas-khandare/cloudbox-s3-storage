@@ -40,10 +40,12 @@ interface Props {
 }
 
 const ACTIVE_OR_PENDING_STATUSES = ["CREATED", "ACTIVE", "PAST_DUE", "HALTED"];
+const MAX_SINGLE_UPLOAD_SIZE = 5_000_000_000;
 
 function formatBytes(value: string | number): string {
   const bytes = Number(value);
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes === MAX_SINGLE_UPLOAD_SIZE) return "5 GB";
   const units = ["B", "KB", "MB", "GB", "TB"];
   const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const amount = bytes / Math.pow(1024, index);
