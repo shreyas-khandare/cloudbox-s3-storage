@@ -63,7 +63,22 @@ The webhook route must be publicly reachable by Razorpay over HTTPS. Do not put 
 
 A successful browser redirect alone does not activate a paid entitlement. The verified `subscription.charged` webhook is responsible for updating the user plan and storage limit.
 
-## 5. Upload-size note
+## 5. Reconcile a paid subscription after a missed webhook
+
+If a customer completed a subscription payment before the webhook endpoint was configured, CloudBox may still show the local subscription as `CREATED`. Do not ask the customer to subscribe or pay again.
+
+The one-time reconciliation script at `backend/src/scripts/reconcile-razorpay-subscription.ts` re-fetches the subscription, its paid invoice, and the linked payment from Razorpay. It checks the subscription/plan IDs, INR amount, invoice state, and captured payment before calling CloudBox's existing transactional activation function.
+
+Run it only from the backend directory and only after confirming that `backend/.env` points to the database used by the account being repaired:
+
+```bash
+cd backend
+RAZORPAY_SUBSCRIPTION_ID=sub_xxxxxxxxxxxxx pnpm exec tsx src/scripts/reconcile-razorpay-subscription.ts
+```
+
+Replace the example value with the existing Razorpay subscription ID. The script does not create a subscription or charge. It exits without changing entitlements if Razorpay's subscription, plan, invoice, or captured payment checks do not match.
+
+## 6. Upload-size note
 
 The Business plan is configured for 10 GiB per file, but the current single-request S3 upload flow advertises and enforces a maximum of 5 GB. Larger uploads require the multipart S3 implementation; the plan page displays the effective limit returned by the API.
 
