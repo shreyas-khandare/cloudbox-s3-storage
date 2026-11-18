@@ -155,6 +155,7 @@ export function BillingPage({ navigate }: Props) {
                 </div>
                 {subscription?.cancelAtPeriodEnd && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Cancellation is scheduled. Your paid plan remains available until {formatDate(subscription.currentPeriodEnd)}.</p>}
                 {subscription?.status === "CREATED" && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Your subscription is awaiting payment authorization. Return to the Razorpay checkout tab to complete it.</p>}
+                {subscription?.status === "ACTIVE" && overview?.plan !== subscription.plan && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Your {subscription.plan} subscription is active with Razorpay. CloudBox will enable the paid plan and its storage limit after Razorpay confirms the first successful plan charge.</p>}
                 {canCancel && <button onClick={() => void cancelAtPeriodEnd()} disabled={cancelling} className="mt-5 inline-flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"><XCircle className="h-4 w-4" /> {cancelling ? "Scheduling…" : "Cancel at period end"}</button>}
                 {subscription?.cancelAtPeriodEnd && <p className="mt-4 text-sm text-[#6B6B8A]">The subscription is already scheduled to cancel at the end of the billing period.</p>}
               </div>
