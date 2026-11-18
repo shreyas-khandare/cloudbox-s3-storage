@@ -107,7 +107,7 @@ export function PlansPage({ navigate }: Props) {
   );
 
   useEffect(() => {
-    if (!user || !pendingSubscription || !["CREATED", "PAST_DUE"].includes(pendingSubscription.status)) {
+    if (!userId || !pendingSubscription || !["CREATED", "PAST_DUE"].includes(pendingSubscription.status)) {
       return;
     }
 
@@ -123,7 +123,7 @@ export function PlansPage({ navigate }: Props) {
     }, 5000);
 
     return () => window.clearInterval(timer);
-  }, [user, pendingSubscription?.id, pendingSubscription?.status, loadData, refreshUser]);
+  }, [userId, pendingSubscription?.id, pendingSubscription?.status, loadData, refreshUser]);
 
   const handleChoosePlan = async (plan: Plan) => {
     setError("");
@@ -186,7 +186,6 @@ export function PlansPage({ navigate }: Props) {
   };
 
   const selectedPlan = new URLSearchParams(location.search).get("selected");
-  const status = pendingSubscription?.status ?? overview?.subscriptionStatus ?? "FREE";
 
   return (
     <div className="min-h-screen cloudbox-font-body" style={{ background: "#F4F4FF" }}>
