@@ -29,6 +29,27 @@ export const createSubscriptionController = async (
       data: result,
     });
   } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "You already have an active or pending subscription"
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    if (
+      error instanceof Error &&
+      error.message.includes("Razorpay plan ID") &&
+      error.message.includes("is not configured")
+    ) {
+      return res.status(503).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
     next(error);
   }
 };
