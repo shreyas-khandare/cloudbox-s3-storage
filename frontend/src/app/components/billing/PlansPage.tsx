@@ -191,8 +191,8 @@ export function PlansPage({ navigate }: Props) {
     <div className="min-h-screen cloudbox-font-body" style={{ background: "#F4F4FF" }}>
       <header className="sticky top-0 z-20 border-b border-[#E8E8F0] bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4">
-          <button onClick={() => navigate(user ? "dashboard" : "landing")} className="flex items-center gap-2 text-sm font-semibold text-[#55556F] hover:text-[#3D38F5]">
-            <ArrowLeft className="h-4 w-4" /> {user ? "Back to dashboard" : "Back to CloudBox"}
+          <button onClick={() => navigate(user ? (user.role === "ADMIN" ? "admin" : "dashboard") : "landing")} className="flex items-center gap-2 text-sm font-semibold text-[#55556F] hover:text-[#3D38F5]">
+            <ArrowLeft className="h-4 w-4" /> {user ? "Back to workspace" : "Back to CloudBox"}
           </button>
           <div className="flex items-center gap-3">
             {user ? (
@@ -202,8 +202,8 @@ export function PlansPage({ navigate }: Props) {
               </>
             ) : (
               <>
-                <Link to="/login" className="text-sm font-semibold text-[#55556F] hover:text-[#3D38F5]">Sign in</Link>
-                <Link to="/register" className="rounded-xl px-4 py-2 text-sm font-semibold text-white accent-gradient">Create account</Link>
+                <Link to="/login" state={{ from: `${location.pathname}${location.search}` }} className="text-sm font-semibold text-[#55556F] hover:text-[#3D38F5]">Sign in</Link>
+                <Link to="/register" state={{ from: `${location.pathname}${location.search}` }} className="rounded-xl px-4 py-2 text-sm font-semibold text-white accent-gradient">Create account</Link>
               </>
             )}
           </div>
