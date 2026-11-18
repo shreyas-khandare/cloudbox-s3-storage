@@ -23,7 +23,7 @@ export const uploadUrlSchema = z.object({
         .number()
         .int()
         .positive()
-        .max(MAX_FILE_SIZE, "File size must not exceed 10 GB"),
+        .max(MAX_FILE_SIZE, "File size must not exceed 5 GB"),
 });
 
 export const saveFileSchema = z.object({
@@ -41,7 +41,7 @@ export const saveFileSchema = z.object({
         .number()
         .int()
         .positive()
-        .max(MAX_FILE_SIZE, "File size must not exceed 10 GB"),
+        .max(MAX_FILE_SIZE, "File size must not exceed 5 GB"),
 
     s3Key: z
         .string()
