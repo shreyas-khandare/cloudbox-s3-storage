@@ -26,7 +26,7 @@ type SubscriptionPlan = {
 
 type FileSort = "name" | "newest" | "oldest" | "largest" | "smallest";
 
-const MAX_SINGLE_UPLOAD_SIZE = 5 * 1024 * 1024 * 1024;
+const MAX_SINGLE_UPLOAD_SIZE = 5_000_000_000;
 const MEGABYTE = 1024 * 1024;
 const GIGABYTE = 1024 * MEGABYTE;
 
