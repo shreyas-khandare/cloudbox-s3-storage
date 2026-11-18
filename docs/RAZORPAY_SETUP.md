@@ -41,6 +41,7 @@ Set a strong webhook secret and put the exact same value in `RAZORPAY_WEBHOOK_SE
 
 Enable the events that the current CloudBox webhook processor handles:
 
+- `subscription.activated`
 - `subscription.charged`
 - `payment.failed`
 - `subscription.cancelled`
@@ -57,7 +58,7 @@ The webhook route must be publicly reachable by Razorpay over HTTPS. Do not put 
 3. Choose Pro or Business. CloudBox calls `POST /api/subscriptions` and displays the Razorpay-hosted checkout link returned by the backend.
 4. Complete the hosted subscription authorization with Razorpay's test credentials.
 5. Return to CloudBox. The plan remains pending until Razorpay delivers a valid webhook and the backend processes the charge.
-6. Confirm the plan, storage quota, subscription status, and payment row through `/billing`.
+6. Confirm the subscription lifecycle status through `/billing`. The `subscription.activated` event records the Razorpay lifecycle state; CloudBox grants paid plan storage only after a verified `subscription.charged` event confirms the plan amount was captured.
 7. Test cancellation from `/billing`. CloudBox schedules cancellation at the end of the current billing period.
 
 A successful browser redirect alone does not activate a paid entitlement. The verified `subscription.charged` webhook is responsible for updating the user plan and storage limit.
