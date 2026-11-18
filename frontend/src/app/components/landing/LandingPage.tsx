@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  Cloud, Zap, Shield, FolderOpen, ArrowRight, CheckCircle2,
+  Cloud, Shield, FolderOpen, ArrowRight, CheckCircle2,
   Upload, Download, Star, Menu, X,
   Lock, FileText, Image, Film, Music, Archive, ChevronRight
 } from "lucide-react";
@@ -401,7 +401,7 @@ export function LandingPage({ navigate }: Props) {
                 <span className="cloudbox-font-display" style={{ fontSize: "1.125rem", fontWeight: 700, color: "#fff" }}>CloudBox</span>
               </div>
               <p className="mb-5" style={{ fontSize: "0.875rem", color: "#6B6B8A", lineHeight: 1.7, maxWidth: "240px" }}>
-                Enterprise-grade cloud storage for modern teams and individuals.
+                A straightforward place to keep personal files organized and easy to access.
               </p>
               <div className="flex gap-3">
                 {["in"].map((item, i) => (
