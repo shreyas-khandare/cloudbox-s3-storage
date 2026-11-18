@@ -422,10 +422,10 @@ export function UserDashboard({ navigate }: Props) {
           <div className="h-1.5 rounded-full mb-3" style={{ background: "rgba(255,255,255,0.1)" }}>
             <div className="h-full rounded-full accent-gradient transition-all" style={{ width: `${usedPct}%` }} />
           </div>
-          <button onClick={() => navigate("landing")}
-            className="w-full py-2 rounded-lg text-white text-xs font-semibold transition-opacity hover:opacity-80 accent-gradient">
+          <a href="/#pricing"
+            className="block w-full py-2 rounded-lg text-center text-white text-xs font-semibold transition-opacity hover:opacity-80 accent-gradient">
             View plans
-          </button>
+          </a>
         </div>
 
         {/* User profile */}
