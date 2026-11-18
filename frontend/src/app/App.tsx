@@ -3,6 +3,7 @@ import {
   Routes,
   Route,
   useNavigate,
+  useLocation,
   Navigate,
 } from "react-router-dom";
 
@@ -30,13 +31,20 @@ function ProtectedRoute({
   children: React.ReactNode;
 }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return <div>Loading...</div>;
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: `${location.pathname}${location.search}` }}
+      />
+    );
   }
 
   return children;
