@@ -193,8 +193,8 @@ export function RegisterPage({ navigate }: Props) {
           <div className="space-y-5">
             {[
               { title: "1 GB Free Storage", desc: "Start immediately, no credit card needed" },
-              { title: "AES-256 Encryption", desc: "Files encrypted at rest with Amazon S3" },
-              { title: "Access Anywhere", desc: "Web, desktop, and mobile apps available" },
+              { title: "Private file access", desc: "Preview and download files through temporary access links" },
+              { title: "Access Anywhere", desc: "Open your CloudBox files from a browser on your devices" },
               { title: "Simple File Management", desc: "Upload, organize and access your files anytime" },
             ].map((item) => (
               <div key={item.title} className="flex items-start gap-3">
