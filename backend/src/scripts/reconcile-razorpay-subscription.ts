@@ -52,7 +52,7 @@ function timestampToDate(value: unknown, field: string): Date {
   return date;
 }
 
-async function main() {
+async function main(subscriptionId: string) {
   const localSubscription = await prisma.subscription.findUnique({
     where: { razorpaySubscriptionId: subscriptionId },
     select: {
@@ -217,14 +217,20 @@ async function main() {
   });
 }
 
-main()
-  .catch((error: unknown) => {
+if (!subscriptionId) {
+  console.error(
+    "Set RAZORPAY_SUBSCRIPTION_ID to the existing Razorpay subscription ID before running this script."
+  );
+  process.exitCode = 1;
+} else {
+  main(subscriptionId).catch((error: unknown) => {
     console.error(
       "Subscription reconciliation failed:",
       error instanceof Error ? error.message : "Unknown error"
     );
     process.exitCode = 1;
   })
-  .finally(async () => {
+  }).finally(async () => {
     await prisma.$disconnect();
   });
+}
