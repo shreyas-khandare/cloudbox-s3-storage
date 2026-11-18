@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Cloud, Eye, EyeOff, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
 import type { Page } from "../../App";
 import { api } from "../../../services/api";
@@ -11,6 +12,22 @@ interface Props {
 
 export function RegisterPage({ navigate }: Props) {
   const { setUser, googleLogin } = useAuth();
+  const routerNavigate = useNavigate();
+  const location = useLocation();
+  const requestedPath = (location.state as { from?: unknown } | null)?.from;
+  const redirectTo = typeof requestedPath === "string" && requestedPath.startsWith("/") && !requestedPath.startsWith("//")
+    ? requestedPath
+    : null;
+
+  const navigateAfterGoogleLogin = (role: "USER" | "ADMIN") => {
+    if (role === "ADMIN") {
+      navigate("admin");
+    } else if (redirectTo) {
+      routerNavigate(redirectTo, { replace: true });
+    } else {
+      navigate("dashboard");
+    }
+  };
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -63,7 +80,7 @@ export function RegisterPage({ navigate }: Props) {
       });
 
       setUser(null);
-      navigate("login");
+      routerNavigate("/login", { state: redirectTo ? { from: redirectTo } : undefined });
     } catch (error: unknown) {
       const message =
         (error as {
@@ -223,11 +240,7 @@ export function RegisterPage({ navigate }: Props) {
                   credentialResponse.credential
                 );
 
-                if (user.role === "ADMIN") {
-                  navigate("admin");
-                } else {
-                  navigate("dashboard");
-                }
+                navigateAfterGoogleLogin(user.role);
               } catch {
                 setError("Google registration failed");
               }
@@ -413,7 +426,7 @@ export function RegisterPage({ navigate }: Props) {
 
           <p className="text-center mt-6" style={{ fontSize: "0.875rem", color: "#6B6B8A" }}>
             Already have an account?{" "}
-            <button onClick={() => navigate("login")}
+            <button onClick={() => routerNavigate("/login", { state: redirectTo ? { from: redirectTo } : undefined })}
               className="font-semibold hover:underline" style={{ color: "#3D38F5" }}>
               Sign in
             </button>
