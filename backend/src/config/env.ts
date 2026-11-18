@@ -53,8 +53,10 @@ export const env = {
     KEY_SECRET: process.env.RAZORPAY_KEY_SECRET!,
     WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET,
     PLANS: {
-      PRO: process.env.RAZORPAY_PRO_PLAN_ID!,
-      BUSINESS: process.env.RAZORPAY_BUSINESS_PLAN_ID!,
+      // Optional at startup so local development can run without billing configured.
+      // Paid checkout fails with a clear error until both IDs are supplied.
+      PRO: process.env.RAZORPAY_PRO_PLAN_ID,
+      BUSINESS: process.env.RAZORPAY_BUSINESS_PLAN_ID,
     },
   },
 };
