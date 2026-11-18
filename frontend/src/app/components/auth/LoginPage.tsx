@@ -139,7 +139,7 @@ export function LoginPage({ navigate }: Props) {
           </blockquote>
 
           <div className="flex gap-6">
-            {[["1 GB", "Free Plan"], ["AES-256", "Encryption at Rest"], ["Amazon S3", "Cloud Storage"]].map(([val, label]) => (
+            {[["1 GB", "Free Plan"], ["100 MB", "Free File Limit"], ["Amazon S3", "Cloud Storage"]].map(([val, label]) => (
               <div key={label}>
                 <p className="cloudbox-font-display" style={{ fontSize: "1.25rem", fontWeight: 700, color: "#fff" }}>{val}</p>
                 <p style={{ fontSize: "0.75rem", color: "#6B6B8A" }}>{label}</p>
