@@ -113,7 +113,7 @@ async function main(subscriptionId: string) {
         invoice.amount_paid === planConfig.price &&
         invoice.amount_due === 0 &&
         typeof invoice.payment_id === "string" &&
-        (!invoice.subscription_id || invoice.subscription_id === subscriptionId)
+        invoice.subscription_id === subscriptionId
     )
     .sort((a, b) => (b.paid_at ?? 0) - (a.paid_at ?? 0))[0];
 
@@ -133,10 +133,10 @@ async function main(subscriptionId: string) {
     payment.captured !== true ||
     payment.amount !== planConfig.price ||
     payment.currency !== "INR" ||
-    payment.subscription_id !== subscriptionId
+    (payment.invoice_id && payment.invoice_id !== paidInvoice.id)
   ) {
     throw new Error(
-      "The invoice's linked payment is not a captured payment matching this subscription and plan."
+      "The invoice-linked payment is not captured or does not match the invoice amount, currency, or invoice reference."
     );
   }
 
