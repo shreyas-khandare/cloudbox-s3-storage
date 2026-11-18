@@ -9,7 +9,7 @@ import { useAuth } from "../../../context/AuthContext";
 import {
   Cloud, FolderOpen, Clock, HardDrive, LogOut, Search,
   Upload, Grid3X3, List, Download, Trash2,
-  FileText, Image, Film, Music, Archive, Plus,
+  FileText, Image, Film, Music, Archive, Plus, CreditCard, ReceiptText,
   Check, Folder, Eye
 } from "lucide-react";
 import type { Page } from "../../App";
@@ -411,6 +411,22 @@ export function UserDashboard({ navigate }: Props) {
               </span>
             </button>
           ))}
+
+          <div className="mt-5 mb-2 px-3">
+            <p style={{ fontSize: "0.6875rem", fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Account
+            </p>
+          </div>
+          <button onClick={() => { navigate("plans"); setSidebarOpen(false); }}
+            className="sidebar-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-left">
+            <CreditCard className="w-4 h-4 flex-shrink-0" style={{ color: "rgba(255,255,255,0.5)" }} />
+            <span style={{ fontSize: "0.875rem", fontWeight: 500, color: "rgba(255,255,255,0.7)" }}>Plans</span>
+          </button>
+          <button onClick={() => { navigate("billing"); setSidebarOpen(false); }}
+            className="sidebar-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-left">
+            <ReceiptText className="w-4 h-4 flex-shrink-0" style={{ color: "rgba(255,255,255,0.5)" }} />
+            <span style={{ fontSize: "0.875rem", fontWeight: 500, color: "rgba(255,255,255,0.7)" }}>Billing</span>
+          </button>
         </nav>
 
         {/* Storage usage */}
@@ -422,10 +438,10 @@ export function UserDashboard({ navigate }: Props) {
           <div className="h-1.5 rounded-full mb-3" style={{ background: "rgba(255,255,255,0.1)" }}>
             <div className="h-full rounded-full accent-gradient transition-all" style={{ width: `${usedPct}%` }} />
           </div>
-          <a href="/#pricing"
-            className="block w-full py-2 rounded-lg text-center text-white text-xs font-semibold transition-opacity hover:opacity-80 accent-gradient">
+          <button onClick={() => navigate("plans")}
+            className="w-full py-2 rounded-lg text-white text-xs font-semibold transition-opacity hover:opacity-80 accent-gradient">
             View plans
-          </a>
+          </button>
         </div>
 
         {/* User profile */}
