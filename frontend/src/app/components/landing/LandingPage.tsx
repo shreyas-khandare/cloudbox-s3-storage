@@ -5,6 +5,7 @@ import {
   Lock, FileText, Image, Film, Music, Archive, ChevronRight
 } from "lucide-react";
 import type { Page } from "../../App";
+import { useAuth } from "../../../context/AuthContext";
 
 interface Props {
   navigate: (page: Page) => void;
@@ -56,6 +57,7 @@ const STATS = [
 ];
 
 export function LandingPage({ navigate }: Props) {
+  const { user } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
@@ -81,13 +83,13 @@ export function LandingPage({ navigate }: Props) {
           </div>
 
           <div className="hidden md:flex items-center gap-3">
-            <button onClick={() => navigate("login")}
+            <button onClick={() => navigate(user ? "dashboard" : "login")}
               className="px-4 py-2 text-sm font-medium text-[#3D38F5] hover:bg-[#EEF0FF] rounded-xl transition-all">
-              Login
+              {user ? "Dashboard" : "Login"}
             </button>
-            <button onClick={() => navigate("register")}
+            <button onClick={() => navigate(user ? "plans" : "register")}
               className="px-5 py-2 text-sm font-medium text-white rounded-xl transition-all hover:opacity-90 hover:shadow-lg hover:shadow-[#3D38F5]/30 accent-gradient">
-              Get Started
+              {user ? "View Plans" : "Get Started"}
             </button>
           </div>
 
@@ -105,13 +107,13 @@ export function LandingPage({ navigate }: Props) {
               <button key={item} onClick={() => { setMobileOpen(false); navigate("plans"); }} className="text-left text-sm font-medium text-[#6B6B8A] hover:text-[#1A1A2E] transition-colors">{item}</button>
             ))}
             <div className="flex gap-3 mt-2">
-              <button onClick={() => navigate("login")}
+              <button onClick={() => navigate(user ? "dashboard" : "login")}
                 className="flex-1 py-2 text-sm font-medium text-[#3D38F5] border border-[#3D38F5]/30 rounded-xl transition-all hover:bg-[#EEF0FF]">
-                Login
+                {user ? "Dashboard" : "Login"}
               </button>
-              <button onClick={() => navigate("register")}
+              <button onClick={() => navigate(user ? "plans" : "register")}
                 className="flex-1 py-2 text-sm font-medium text-white rounded-xl accent-gradient">
-                Get Started
+                {user ? "View Plans" : "Get Started"}
               </button>
             </div>
           </div>
@@ -142,9 +144,9 @@ export function LandingPage({ navigate }: Props) {
             </p>
 
             <div className="flex flex-wrap gap-3 mb-10">
-              <button onClick={() => navigate("register")}
+              <button onClick={() => navigate(user ? "dashboard" : "register")}
                 className="flex items-center gap-2 px-6 py-3 text-white rounded-xl font-semibold text-sm accent-gradient shadow-lg shadow-[#3D38F5]/30 hover:opacity-90 transition-all hover:-translate-y-0.5">
-                Start Free Today
+                {user ? "Open Dashboard" : "Start Free Today"}
                 <ArrowRight className="w-4 h-4" />
               </button>
               <button onClick={() => navigate("plans")}
@@ -380,9 +382,9 @@ export function LandingPage({ navigate }: Props) {
               Securely store, organize, and access your files from anywhere.
               Get started with 1 GB of free storage no credit card required.
             </p>
-            <button onClick={() => navigate("register")}
+            <button onClick={() => navigate(user ? "dashboard" : "register")}
               className="inline-flex items-center gap-2 px-8 py-3.5 text-white rounded-xl font-semibold text-sm accent-gradient shadow-lg shadow-[#3D38F5]/30 hover:opacity-90 transition-all hover:-translate-y-0.5">
-              Create Free Account
+              {user ? "Open Dashboard" : "Create Free Account"}
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
