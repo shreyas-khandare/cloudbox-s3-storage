@@ -222,15 +222,17 @@ if (!subscriptionId) {
     "Set RAZORPAY_SUBSCRIPTION_ID to the existing Razorpay subscription ID before running this script."
   );
   process.exitCode = 1;
+  void prisma.$disconnect();
 } else {
-  main(subscriptionId).catch((error: unknown) => {
-    console.error(
-      "Subscription reconciliation failed:",
-      error instanceof Error ? error.message : "Unknown error"
-    );
-    process.exitCode = 1;
-  })
-  }).finally(async () => {
-    await prisma.$disconnect();
-  });
+  void main(subscriptionId)
+    .catch((error: unknown) => {
+      console.error(
+        "Subscription reconciliation failed:",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
 }
