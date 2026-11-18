@@ -19,7 +19,9 @@ export const createSubscription = async (
   const razorpayPlanId = planConfig[plan];
 
   if (!razorpayPlanId) {
-    throw new Error("Invalid subscription plan");
+    throw new Error(
+      `Razorpay plan ID for ${plan} is not configured. Set RAZORPAY_${plan}_PLAN_ID in the backend environment.`
+    );
   }
 
   const user = await prisma.user.findUnique({
