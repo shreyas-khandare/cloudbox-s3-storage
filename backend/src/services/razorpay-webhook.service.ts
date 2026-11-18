@@ -371,6 +371,10 @@ export const processRazorpayWebhookEvent = async (
         await processSubscriptionChargedEvent(webhookEvent.payload);
         break;
 
+      case "subscription.activated":
+        await processSubscriptionActivatedEvent(webhookEvent.payload);
+        break;
+
       case "payment.failed":
         await processPaymentFailedEvent(webhookEvent.payload);
         break;
@@ -427,6 +431,91 @@ export const processRazorpayWebhookEvent = async (
 
     throw error;
   }
+};
+
+
+/**
+ * Records the Razorpay subscription lifecycle transition to ACTIVE.
+ *
+ * This event alone does not prove that the plan amount was captured.
+ * Paid plan/storage entitlements are therefore granted only by the
+ * subscription.charged handler after payment amount and capture checks.
+ */
+export const processSubscriptionActivatedEvent = async (
+  payload: any
+) => {
+  const razorpaySubscription = payload?.subscription?.entity;
+
+  if (
+    !razorpaySubscription?.id ||
+    razorpaySubscription.status !== "active"
+  ) {
+    throw new Error("Invalid subscription.activated payload");
+  }
+
+  const currentPeriodStart = Number.isFinite(razorpaySubscription.current_start)
+    ? new Date(razorpaySubscription.current_start * 1000)
+    : null;
+  const currentPeriodEnd = Number.isFinite(razorpaySubscription.current_end)
+    ? new Date(razorpaySubscription.current_end * 1000)
+    : null;
+
+  if (
+    (currentPeriodStart && !Number.isFinite(currentPeriodStart.getTime())) ||
+    (currentPeriodEnd && !Number.isFinite(currentPeriodEnd.getTime())) ||
+    (currentPeriodStart &&
+      currentPeriodEnd &&
+      currentPeriodEnd <= currentPeriodStart)
+  ) {
+    throw new Error("Invalid subscription billing period");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const subscription = await tx.subscription.findUnique({
+      where: {
+        razorpaySubscriptionId: razorpaySubscription.id,
+      },
+    });
+
+    if (!subscription) {
+      throw new Error("Subscription not found");
+    }
+
+    if (
+      subscription.status === SubscriptionStatus.CANCELLED ||
+      subscription.status === SubscriptionStatus.EXPIRED
+    ) {
+      return { ignored: true };
+    }
+
+    if (
+      razorpaySubscription.plan_id &&
+      razorpaySubscription.plan_id !== subscription.razorpayPlanId
+    ) {
+      throw new Error("Razorpay plan does not match local subscription");
+    }
+
+    await tx.subscription.update({
+      where: { id: subscription.id },
+      data: {
+        status: SubscriptionStatus.ACTIVE,
+        ...(currentPeriodStart ? { currentPeriodStart } : {}),
+        ...(currentPeriodEnd ? { currentPeriodEnd } : {}),
+      },
+    });
+
+    await tx.user.update({
+      where: { id: subscription.userId },
+      data: {
+        subscriptionStatus: SubscriptionStatus.ACTIVE,
+      },
+    });
+
+    return {
+      activated: true,
+      awaitingCharge: true,
+    };
+  });
 };
 
 
