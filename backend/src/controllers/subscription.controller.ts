@@ -28,7 +28,48 @@ export const createSubscriptionController = async (
       message: "Subscription created successfully",
       data: result,
     });
-  } catch (error) {
+  } catch (error: unknown) {
+    const errorRecord =
+      typeof error === "object" && error !== null
+        ? (error as Record<string, unknown>)
+        : null;
+    const nestedError =
+      errorRecord?.error && typeof errorRecord.error === "object"
+        ? (errorRecord.error as Record<string, unknown>)
+        : null;
+    const response =
+      errorRecord?.response && typeof errorRecord.response === "object"
+        ? (errorRecord.response as Record<string, unknown>)
+        : null;
+    const responseData =
+      response?.data && typeof response.data === "object"
+        ? (response.data as Record<string, unknown>)
+        : null;
+    const responseError =
+      responseData?.error && typeof responseData.error === "object"
+        ? (responseData.error as Record<string, unknown>)
+        : null;
+
+    const providerDescription =
+      (typeof nestedError?.description === "string" && nestedError.description) ||
+      (typeof responseError?.description === "string" && responseError.description) ||
+      (typeof errorRecord?.description === "string" && errorRecord.description) ||
+      (typeof responseData?.message === "string" && responseData.message) ||
+      null;
+
+    const providerCode =
+      (typeof nestedError?.code === "string" && nestedError.code) ||
+      (typeof responseError?.code === "string" && responseError.code) ||
+      (typeof errorRecord?.code === "string" && errorRecord.code) ||
+      null;
+
+    const providerStatus =
+      typeof errorRecord?.statusCode === "number"
+        ? errorRecord.statusCode
+        : typeof response?.status === "number"
+          ? response.status
+          : null;
+
     if (
       error instanceof Error &&
       error.message === "You already have an active or pending subscription"
@@ -50,7 +91,23 @@ export const createSubscriptionController = async (
       });
     }
 
-    next(error);
+    if (providerDescription || providerCode || providerStatus) {
+      console.error("Razorpay subscription creation rejected:", {
+        statusCode: providerStatus,
+        code: providerCode,
+        description: providerDescription,
+      });
+
+      return res.status(502).json({
+        success: false,
+        message:
+          providerDescription ||
+          "Razorpay rejected the subscription request. Check the backend Razorpay credentials and Plan ID mode.",
+        code: providerCode,
+      });
+    }
+
+    next(error instanceof Error ? error : new Error("Unknown subscription creation error"));
   }
 };
 
