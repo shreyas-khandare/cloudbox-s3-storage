@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Cloud, Eye, EyeOff, ArrowRight, AlertCircle } from "lucide-react";
 import type { Page } from "../../App";
 import { api } from "../../../services/api";
@@ -11,6 +12,22 @@ interface Props {
 
 export function LoginPage({ navigate }: Props) {
   const { setUser, googleLogin } = useAuth();
+  const routerNavigate = useNavigate();
+  const location = useLocation();
+  const requestedPath = (location.state as { from?: unknown } | null)?.from;
+  const redirectTo = typeof requestedPath === "string" && requestedPath.startsWith("/") && !requestedPath.startsWith("//")
+    ? requestedPath
+    : null;
+
+  const navigateAfterLogin = (role: "USER" | "ADMIN") => {
+    if (role === "ADMIN") {
+      navigate("admin");
+    } else if (redirectTo) {
+      routerNavigate(redirectTo, { replace: true });
+    } else {
+      navigate("dashboard");
+    }
+  };
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -56,19 +73,7 @@ export function LoginPage({ navigate }: Props) {
         user
       );
 
-      if (user.role === "ADMIN") {
-
-        navigate(
-          "admin"
-        );
-
-      } else {
-
-        navigate(
-          "dashboard"
-        );
-
-      }
+      navigateAfterLogin(user.role);
 
     } catch (err: any) {
 
@@ -178,15 +183,7 @@ export function LoginPage({ navigate }: Props) {
                     await googleLogin(
                       credentialResponse.credential
                     );
-                  if (user.role === "ADMIN") {
-                    navigate(
-                      "admin"
-                    );
-                  } else {
-                    navigate(
-                      "dashboard"
-                    );
-                  }
+                  navigateAfterLogin(user.role);
                 } catch (error) {
                   console.log(error);
                   setError(
@@ -284,7 +281,7 @@ export function LoginPage({ navigate }: Props) {
 
           <p className="text-center mt-6" style={{ fontSize: "0.875rem", color: "#6B6B8A" }}>
             Don't have an account?{" "}
-            <button onClick={() => navigate("register")}
+            <button onClick={() => routerNavigate("/register", { state: redirectTo ? { from: redirectTo } : undefined })}
               className="font-semibold hover:underline" style={{ color: "#3D38F5" }}>
               Create account
             </button>
