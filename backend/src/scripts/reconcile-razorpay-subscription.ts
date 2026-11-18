@@ -7,12 +7,6 @@ type RazorpayEntity = Record<string, any>;
 
 const subscriptionId = process.env.RAZORPAY_SUBSCRIPTION_ID?.trim();
 
-if (!subscriptionId) {
-  throw new Error(
-    "Set RAZORPAY_SUBSCRIPTION_ID to the existing Razorpay subscription ID before running this script."
-  );
-}
-
 const authorization =
   "Basic " +
   Buffer.from(
