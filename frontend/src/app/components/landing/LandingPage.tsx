@@ -13,29 +13,29 @@ interface Props {
 const FEATURES = [
   {
     icon: Shield,
-    title: "Secure Cloud Storage",
-    desc: "Files stored securely on Amazon S3 with AES-256 encryption at rest.",
+    title: "Private file access",
+    desc: "Your files belong to your account. CloudBox generates time-limited links when you preview or download them.",
     color: "#3D38F5",
     bg: "#EEF0FF",
   },
   {
-    icon: Zap,
-    title: "Lightning Fast Uploads",
-    desc: "Upload and access files from anywhere.",
+    icon: Upload,
+    title: "Direct S3 uploads",
+    desc: "Send files directly to Amazon S3 and follow the real transfer progress while each upload completes.",
     color: "#6C63FF",
     bg: "#F0EEFF",
   },
   {
-    icon: Lock,
-    title: "JWT Authentication",
-    desc: "Secure user authentication with protected routes.",
+    icon: FolderOpen,
+    title: "Practical file management",
+    desc: "Search, sort, preview, download, and delete files from one focused dashboard.",
     color: "#4F46E5",
     bg: "#EEF0FF",
   },
   {
-    icon: FolderOpen,
-    title: "Simple File Management",
-    desc: "Upload, download and organize files in one place.",
+    icon: Lock,
+    title: "Protected account access",
+    desc: "Create an account with verified email or sign in with Google. Your files are isolated to your account.",
     color: "#7C3AED",
     bg: "#F3EEFF",
   },
@@ -49,52 +49,10 @@ const FLOATING_FILES = [
 ];
 
 const STATS = [
-  { value: "1 GB", label: "Free Plan" },
-  { value: "AES-256", label: "Encrypted at Rest" },
-  { value: "JWT", label: "Secure Authentication" },
-  { value: "100%", label: "User Controlled" },
-];
-
-const PLANS = [
-  {
-    name: "Free",
-    price: "₹0",
-    period: "/month",
-    storage: "1 GB",
-    accent: true,
-    features: [
-      "1 GB Storage",
-      "100 MB Max File Size",
-      "Secure File Uploads",
-      "Basic File Management",
-    ],
-  },
-  {
-    name: "Pro",
-    price: "₹149",
-    period: "/month",
-    storage: "100 GB",
-    accent: false,
-    features: [
-      "100 GB Storage",
-      "Priority Support",
-      "Large File Uploads",
-      "Advanced Sharing",
-    ],
-  },
-  {
-    name: "Business",
-    price: "₹399",
-    period: "/month",
-    storage: "1 TB",
-    accent: false,
-    features: [
-      "1 TB Storage",
-      "Team Collaboration",
-      "Admin Controls",
-      "API Access",
-    ],
-  },
+  { value: "1 GB", label: "Free Storage" },
+  { value: "100 MB", label: "Free File Limit" },
+  { value: "S3", label: "Direct Uploads" },
+  { value: "2", label: "Devices on Free" },
 ];
 
 export function LandingPage({ navigate }: Props) {
@@ -115,11 +73,10 @@ export function LandingPage({ navigate }: Props) {
           </button>
 
           <div className="hidden md:flex items-center gap-8">
-            {["Features", "Pricing"].map((item) => (
-              <a key={item} href={`#${item.toLowerCase()}`}
-                className="text-sm font-medium text-[#6B6B8A] hover:text-[#1A1A2E] transition-colors cursor-pointer">
-                {item}
-              </a>
+            {["Features", "Plans"].map((item) => item === "Features" ? (
+              <a key={item} href="#features" className="text-sm font-medium text-[#6B6B8A] hover:text-[#1A1A2E] transition-colors">{item}</a>
+            ) : (
+              <button key={item} onClick={() => navigate("plans")} className="text-sm font-medium text-[#6B6B8A] hover:text-[#1A1A2E] transition-colors">{item}</button>
             ))}
           </div>
 
@@ -142,12 +99,10 @@ export function LandingPage({ navigate }: Props) {
 
         {mobileOpen && (
           <div className="md:hidden px-6 pb-4 flex flex-col gap-3 border-t border-white/30 pt-4">
-            {["Features", "Pricing"].map((item) => (
-              <a key={item} href={`#${item.toLowerCase()}`}
-                className="text-sm font-medium text-[#6B6B8A] hover:text-[#1A1A2E] transition-colors"
-                onClick={() => setMobileOpen(false)}>
-                {item}
-              </a>
+            {["Features", "Plans"].map((item) => item === "Features" ? (
+              <a key={item} href="#features" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-[#6B6B8A] hover:text-[#1A1A2E] transition-colors">{item}</a>
+            ) : (
+              <button key={item} onClick={() => { setMobileOpen(false); navigate("plans"); }} className="text-left text-sm font-medium text-[#6B6B8A] hover:text-[#1A1A2E] transition-colors">{item}</button>
             ))}
             <div className="flex gap-3 mt-2">
               <button onClick={() => navigate("login")}
@@ -171,7 +126,7 @@ export function LandingPage({ navigate }: Props) {
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-6"
               style={{ background: "#EEF0FF", color: "#3D38F5", border: "1px solid rgba(61,56,245,0.2)" }}>
               <Star className="w-3 h-3" fill="currentColor" />
-              Trusted by 50+ users worldwide
+              Cloud storage, without the clutter
             </div>
 
             <h1 className="cloudbox-font-display mb-6 leading-tight"
@@ -182,8 +137,8 @@ export function LandingPage({ navigate }: Props) {
             </h1>
 
             <p className="mb-8 max-w-lg" style={{ fontSize: "1.0625rem", color: "#6B6B8A", lineHeight: 1.75 }}>
-              Fast, private file storage powered by enterprise-grade cloud infrastructure.
-              Protect what matters most with zero-knowledge encryption and instant global access.
+              A straightforward place to upload, find, preview, download, and manage your files.
+              Start with 1 GB of free storage, then choose a paid plan when you need more room.
             </p>
 
             <div className="flex flex-wrap gap-3 mb-10">
@@ -192,9 +147,9 @@ export function LandingPage({ navigate }: Props) {
                 Start Free Today
                 <ArrowRight className="w-4 h-4" />
               </button>
-              <button onClick={() => navigate("dashboard")}
+              <button onClick={() => navigate("plans")}
                 className="flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm border-2 border-[#3D38F5]/20 text-[#3D38F5] hover:border-[#3D38F5]/40 hover:bg-[#EEF0FF] transition-all">
-                View Dashboard
+                Compare Plans
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -353,11 +308,11 @@ export function LandingPage({ navigate }: Props) {
             Why CloudBox
           </div>
           <h2 className="cloudbox-font-display mb-4" style={{ fontSize: "clamp(1.875rem, 4vw, 2.5rem)", fontWeight: 800, color: "#1A1A2E" }}>
-            Everything you need to store,{" "}
-            <span className="gradient-text">share, and sync</span>
+            Everything you need to{" "}
+            <span className="gradient-text">manage your files</span>
           </h2>
           <p className="max-w-xl mx-auto" style={{ fontSize: "1rem", color: "#6B6B8A", lineHeight: 1.75 }}>
-            Built for individuals and teams who demand privacy, speed, and reliability from their cloud storage.
+            Built for individuals who want a clear, reliable way to keep their files organized and accessible.
           </p>
         </div>
 
@@ -379,196 +334,34 @@ export function LandingPage({ navigate }: Props) {
         </div>
       </section>
 
-      {/* Storage / Pricing Section */}
-      {/* Storage / Pricing Section */}
-      <section
-        id="pricing"
-        className="py-24 px-6"
-        style={{
-          background: "linear-gradient(135deg, #1A1A2E 0%, #2C2C2C 100%)",
-        }}
-      >
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <div
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-4"
-              style={{
-                background: "rgba(61,56,245,0.2)",
-                color: "#8B87FF",
-              }}
-            >
-              Simple Pricing
-            </div>
-
-            <h2
-              className="cloudbox-font-display mb-4"
-              style={{
-                fontSize: "clamp(1.875rem, 4vw, 2.5rem)",
-                fontWeight: 800,
-                color: "#fff",
-              }}
-            >
-              Start free. Scale as you grow.
-            </h2>
-
-            <p
-              style={{
-                fontSize: "1rem",
-                color: "#9090A8",
-                lineHeight: 1.75,
-              }}
-            >
-              No hidden fees. No surprise bills. Just transparent, fair pricing.
-            </p>
+      {/* Pricing overview */}
+      <section id="pricing" className="py-24 px-6" style={{ background: "linear-gradient(135deg, #1A1A2E 0%, #2C2C2C 100%)" }}>
+        <div className="mx-auto max-w-5xl text-center">
+          <div className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold mb-4" style={{ background: "rgba(61,56,245,0.2)", color: "#A7A3FF" }}>
+            Flexible storage
           </div>
-
-          <div className="grid md:grid-cols-3 gap-6">
-            {PLANS.map((plan) => {
-              const comingSoon = plan.name !== "Free";
-
-              return (
-                <div
-                  key={plan.name}
-                  className={`relative p-7 rounded-2xl transition-transform hover:-translate-y-1 ${comingSoon ? "opacity-70" : ""
-                    } ${plan.accent ? "accent-gradient shadow-2xl shadow-[#3D38F5]/40" : ""}`}
-                  style={
-                    !plan.accent
-                      ? {
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.1)",
-                      }
-                      : {}
-                  }
-                >
-                  {!comingSoon && plan.accent && (
-                    <div
-                      className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-bold"
-                      style={{
-                        background: "#fff",
-                        color: "#3D38F5",
-                      }}
-                    >
-                      Free Forever
-                    </div>
-                  )}
-
-                  {comingSoon && (
-                    <div
-                      className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-bold"
-                      style={{
-                        background: "#4B5563",
-                        color: "#fff",
-                      }}
-                    >
-                      Coming Soon
-                    </div>
-                  )}
-
-                  <div className="mb-6">
-                    <p
-                      className="mb-1"
-                      style={{
-                        fontSize: "0.75rem",
-                        fontWeight: 600,
-                        color: plan.accent
-                          ? "rgba(255,255,255,0.7)"
-                          : "#9090A8",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
-                      }}
-                    >
-                      {plan.name}
-                    </p>
-
-                    <div className="flex items-end gap-1">
-                      <span
-                        className="cloudbox-font-display"
-                        style={{
-                          fontSize: "2.5rem",
-                          fontWeight: 800,
-                          color: "#fff",
-                        }}
-                      >
-                        {plan.price}
-                      </span>
-
-                      <span
-                        className="mb-2"
-                        style={{
-                          fontSize: "0.875rem",
-                          color: plan.accent
-                            ? "rgba(255,255,255,0.6)"
-                            : "#9090A8",
-                        }}
-                      >
-                        {plan.period}
-                      </span>
-                    </div>
-
-                    <p
-                      style={{
-                        fontSize: "0.875rem",
-                        color: plan.accent
-                          ? "rgba(255,255,255,0.8)"
-                          : "#9090A8",
-                      }}
-                    >
-                      {plan.storage} storage
-                    </p>
-                  </div>
-
-                  <ul className="space-y-3 mb-7">
-                    {plan.features.map((f) => (
-                      <li key={f} className="flex items-center gap-2.5">
-                        <CheckCircle2
-                          className="w-4 h-4 flex-shrink-0"
-                          style={{
-                            color: plan.accent ? "#fff" : "#3D38F5",
-                          }}
-                        />
-                        <span
-                          style={{
-                            fontSize: "0.875rem",
-                            color: plan.accent
-                              ? "rgba(255,255,255,0.9)"
-                              : "#B8B8D0",
-                          }}
-                        >
-                          {f}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-
-                  <button
-                    onClick={() => {
-                      if (!comingSoon) navigate("register");
-                    }}
-                    disabled={comingSoon}
-                    className="w-full py-3 rounded-xl text-sm font-semibold transition-all"
-                    style={{
-                      background: comingSoon
-                        ? "#4B5563"
-                        : plan.accent
-                          ? "#fff"
-                          : "rgba(61,56,245,0.2)",
-                      color: comingSoon
-                        ? "#D1D5DB"
-                        : plan.accent
-                          ? "#3D38F5"
-                          : "#8B87FF",
-                      border: plan.accent
-                        ? "none"
-                        : "1px solid rgba(61,56,245,0.3)",
-                      cursor: comingSoon ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    {comingSoon ? "Coming Soon" : "Get Started"}
-                  </button>
-                </div>
-              );
-            })}
+          <h2 className="cloudbox-font-display mb-4" style={{ fontSize: "clamp(1.875rem, 4vw, 2.5rem)", fontWeight: 800, color: "#fff" }}>
+            Start free. Upgrade when you need more space.
+          </h2>
+          <p className="mx-auto mb-9 max-w-2xl" style={{ fontSize: "1rem", color: "#B0B0C8", lineHeight: 1.75 }}>
+            Compare the actual storage quotas, per-file limits, device limits, and monthly prices on the dedicated plans page.
+          </p>
+          <div className="mb-9 grid gap-3 text-left sm:grid-cols-3">
+            {[
+              { name: "Free", storage: "1 GB", price: "₹0" },
+              { name: "Pro", storage: "100 GB", price: "₹149 / month" },
+              { name: "Business", storage: "1 TB", price: "₹399 / month" },
+            ].map((plan) => (
+              <div key={plan.name} className="rounded-2xl border p-5" style={{ background: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.12)" }}>
+                <p className="text-sm font-semibold text-white">{plan.name}</p>
+                <p className="cloudbox-font-display mt-2 text-2xl font-bold text-white">{plan.storage}</p>
+                <p className="mt-1 text-xs" style={{ color: "#B0B0C8" }}>{plan.price}</p>
+              </div>
+            ))}
           </div>
+          <button onClick={() => navigate("plans")} className="inline-flex items-center gap-2 rounded-xl px-7 py-3.5 text-sm font-semibold text-white accent-gradient">
+            Compare all plans <ArrowRight className="h-4 w-4" />
+          </button>
         </div>
       </section>
 
@@ -633,9 +426,8 @@ export function LandingPage({ navigate }: Props) {
             </div>
 
             {[
-              { title: "Product", links: ["Features", "Security", "Integrations", "Changelog"] },
-              // { title: "Company", links: ["About", "Blog", "Careers", "Press"] },
-              { title: "Support", links: ["Help Center", "Community", "Status", "Contact"] },
+              { title: "Product", links: ["Features", "Plans"] },
+              { title: "Account", links: ["Login", "Create account"] },
             ].map((col) => (
               <div key={col.title}>
                 <p className="mb-4" style={{ fontSize: "0.75rem", fontWeight: 600, color: "#fff", textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -644,7 +436,7 @@ export function LandingPage({ navigate }: Props) {
                 <ul className="space-y-2.5">
                   {col.links.map((link) => (
                     <li key={link}>
-                      <a href="#" style={{ fontSize: "0.875rem", color: "#6B6B8A" }}
+                      <a href={link === "Features" ? "#features" : link === "Plans" ? "/plans" : link === "Login" ? "/login" : "/register"} style={{ fontSize: "0.875rem", color: "#6B6B8A" }}
                         className="hover:text-white transition-colors">{link}</a>
                     </li>
                   ))}
