@@ -116,7 +116,7 @@ export function BillingPage({ navigate }: Props) {
     <div className="min-h-screen cloudbox-font-body" style={{ background: "#F4F4FF" }}>
       <header className="border-b border-[#E8E8F0] bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
-          <button onClick={() => navigate("dashboard")} className="inline-flex items-center gap-2 text-sm font-semibold text-[#55556F] hover:text-[#3D38F5]"><ArrowLeft className="h-4 w-4" /> Dashboard</button>
+          <button onClick={() => navigate(user?.role === "ADMIN" ? "admin" : "dashboard")} className="inline-flex items-center gap-2 text-sm font-semibold text-[#55556F] hover:text-[#3D38F5]"><ArrowLeft className="h-4 w-4" /> Workspace</button>
           <span className="text-xs font-semibold text-[#8585A0]">{user?.email}</span>
         </div>
       </header>
