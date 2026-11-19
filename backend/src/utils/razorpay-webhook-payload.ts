@@ -1,3 +1,22 @@
+/**
+ * Razorpay webhook rows store the complete signed event envelope. Most
+ * event handlers consume the inner `payload` object. Accept both shapes so
+ * persisted events and already-unwrapped unit-test/provider payloads work.
+ */
+export const unwrapRazorpayWebhookPayload = (value: any): any => {
+  const nestedPayload = value?.payload;
+
+  if (
+    nestedPayload &&
+    typeof nestedPayload === "object" &&
+    !Array.isArray(nestedPayload)
+  ) {
+    return nestedPayload;
+  }
+
+  return value;
+};
+
 export type ParsedSubscriptionCharge = {
   subscriptionId: string;
   paymentId: string;
@@ -20,8 +39,9 @@ export type ParsedSubscriptionCharge = {
 export const parseSubscriptionChargedEvent = (
   payload: any
 ): ParsedSubscriptionCharge => {
-  const subscription = payload?.subscription?.entity;
-  const payment = payload?.payment?.entity;
+  const eventPayload = unwrapRazorpayWebhookPayload(payload);
+  const subscription = eventPayload?.subscription?.entity;
+  const payment = eventPayload?.payment?.entity;
 
   if (
     typeof subscription?.id !== "string" ||
