@@ -230,10 +230,11 @@ export const cancelSubscriptionController = async (
   req: Request,
   res: Response
 ) => {
-  try {
-    const userId = req.user!.id;
+  const userId = req.user!.id;
 
-    const subscription = await prisma.subscription.findFirst({
+  let subscription;
+  try {
+    subscription = await prisma.subscription.findFirst({
       where: {
         userId,
         status: SubscriptionStatus.ACTIVE,
@@ -242,53 +243,62 @@ export const cancelSubscriptionController = async (
         createdAt: "desc",
       },
     });
-
-    if (!subscription) {
-      return res.status(404).json({
-        message: "No active subscription found",
-      });
-    }
-
-    if (
-      !subscription.currentPeriodEnd ||
-      subscription.currentPeriodEnd <= new Date()
-    ) {
-      return res.status(400).json({
-        message: "Subscription has no valid active billing period",
-      });
-    }
-
-    if (subscription.cancelAtPeriodEnd) {
-      return res.status(400).json({
-        message: "Subscription cancellation is already scheduled",
-      });
-    }
-
-    // Schedule cancellation through Razorpay at the end of the billing cycle.
-    await cancelRazorpaySubscription(
-      subscription.razorpaySubscriptionId
-    );
-
-    // Update the local subscription record.
-    await prisma.subscription.update({
-      where: {
-        id: subscription.id,
-      },
-      data: {
-        cancelAtPeriodEnd: true,
-      },
-    });
-
-    return res.status(200).json({
-      message: "Subscription cancellation scheduled successfully",
-      cancelAtPeriodEnd: true,
-      currentPeriodEnd: subscription.currentPeriodEnd,
-    });
   } catch (error) {
-    console.error("Cancel subscription error:", error);
-
-    return res.status(500).json({
-      message: "Failed to schedule subscription cancellation",
+    console.error("[Billing] Failed to load subscription before cancellation:", error);
+    return res.status(503).json({
+      message: "Billing data is temporarily unavailable. Please try again.",
     });
   }
+
+  if (!subscription) {
+    return res.status(404).json({
+      message: "No active subscription found",
+    });
+  }
+
+  if (
+    !subscription.currentPeriodEnd ||
+    subscription.currentPeriodEnd <= new Date()
+  ) {
+    return res.status(400).json({
+      message: "Subscription has no valid active billing period",
+    });
+  }
+
+  if (subscription.cancelAtPeriodEnd) {
+    return res.status(400).json({
+      message: "Subscription cancellation is already scheduled",
+    });
+  }
+
+  // First ask Razorpay to schedule cancellation. Do not change local state
+  // unless the provider accepts the request.
+  try {
+    await cancelRazorpaySubscription(subscription.razorpaySubscriptionId);
+  } catch (error) {
+    console.error("[Billing] Razorpay rejected cancellation:", error);
+    return res.status(502).json({
+      message: "Razorpay could not schedule the cancellation. No local billing changes were made.",
+    });
+  }
+
+  // The provider accepted the request; persist the matching local flag.
+  try {
+    await prisma.subscription.update({
+      where: { id: subscription.id },
+      data: { cancelAtPeriodEnd: true },
+    });
+  } catch (error) {
+    console.error("[Billing] Razorpay accepted cancellation but CloudBox could not persist it:", error);
+    return res.status(503).json({
+      message: "Razorpay accepted the cancellation, but CloudBox could not update its billing record. Refresh Billing before trying again.",
+      providerAccepted: true,
+    });
+  }
+
+  return res.status(200).json({
+    message: "Subscription cancellation scheduled successfully",
+    cancelAtPeriodEnd: true,
+    currentPeriodEnd: subscription.currentPeriodEnd,
+  });
 };
