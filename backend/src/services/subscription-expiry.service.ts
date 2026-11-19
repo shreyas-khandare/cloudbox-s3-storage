@@ -118,7 +118,7 @@ export const expireSubscriptions = async () => {
 
 let expiryJobRunning = false;
 
-export const startSubscriptionExpiryScheduler = () => {
+export const startSubscriptionExpiryScheduler = (): NodeJS.Timeout => {
   const runExpiryJob = async () => {
     if (expiryJobRunning) return;
 
@@ -143,8 +143,10 @@ export const startSubscriptionExpiryScheduler = () => {
   // Run immediately when the server starts.
   void runExpiryJob();
 
-  // Repeat every hour.
-  setInterval(() => {
+  // Repeat every hour without keeping the process alive during shutdown.
+  const timer = setInterval(() => {
     void runExpiryJob();
   }, 60 * 60 * 1000);
+  timer.unref();
+  return timer;
 };
