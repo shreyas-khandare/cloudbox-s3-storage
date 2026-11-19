@@ -78,8 +78,16 @@ RAZORPAY_SUBSCRIPTION_ID=sub_xxxxxxxxxxxxx pnpm exec tsx src/scripts/reconcile-r
 
 Replace the example value with the existing Razorpay subscription ID. The script does not create a subscription or charge. It exits without changing entitlements if Razorpay's subscription, plan, invoice, or captured payment checks do not match.
 
-## 6. Upload-size note
+## 6. Upload-size limits
 
-The Business plan is configured for 10 GiB per file, but the current single-request S3 upload flow advertises and enforces a maximum of 5 GB. Larger uploads require the multipart S3 implementation; the plan page displays the effective limit returned by the API.
+CloudBox enforces these per-file limits on both upload URL creation and file-metadata save:
+
+| Plan | Maximum file size |
+| --- | ---: |
+| Free | 100 MB |
+| Pro | 3 GB |
+| Business | 5 GB |
+
+The Pro limit is stored as 3 GiB (3 × 1024³ bytes). The Business limit is 5,000,000,000 bytes to match the current single-request S3 upload cap. Files above 5 GB require the S3 multipart upload implementation, which is not available yet. The Plans API and frontend display the effective enforced limit.
 
 Before switching to Live Mode, replace all Test Mode keys and Plan IDs with the matching Live Mode values and verify a real webhook delivery.
