@@ -23,6 +23,7 @@ export const getDependencyFailure = (error: unknown) => {
         ? record.Code
         : "";
   const name = typeof record?.name === "string" ? record.name : "";
+  const message = typeof record?.message === "string" ? record.message : "";
   const providerStatus =
     typeof record?.$metadata?.httpStatusCode === "number"
       ? record.$metadata.httpStatusCode
