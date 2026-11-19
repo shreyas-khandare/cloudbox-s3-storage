@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Cloud, Eye, EyeOff, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
 import type { Page } from "../../App";
 import { api } from "../../../services/api";
+import { getApiErrorMessage } from "../../../services/api-error";
 import { useAuth } from "../../../context/AuthContext";
 import { GoogleLogin } from "@react-oauth/google";
 
@@ -82,12 +83,7 @@ export function RegisterPage({ navigate }: Props) {
       setUser(null);
       routerNavigate("/login", { state: redirectTo ? { from: redirectTo } : undefined });
     } catch (error: unknown) {
-      const message =
-        (error as {
-          response?: { data?: { message?: string } };
-        }).response?.data?.message ?? "Registration failed";
-
-      setError(message);
+      setError(getApiErrorMessage(error, "Registration failed"));
     } finally {
       setLoading(false);
     }
@@ -114,12 +110,7 @@ export function RegisterPage({ navigate }: Props) {
       setOtp("");
       setEmailVerified(false);
     } catch (error: unknown) {
-      const message =
-        (error as {
-          response?: { data?: { message?: string } };
-        }).response?.data?.message ?? "Unable to send OTP.";
-
-      setError(message);
+      setError(getApiErrorMessage(error, "Unable to send OTP."));
     } finally {
       setOtpLoading(false);
     }
@@ -145,12 +136,7 @@ export function RegisterPage({ navigate }: Props) {
     } catch (error: unknown) {
       setEmailVerified(false);
 
-      const message =
-        (error as {
-          response?: { data?: { message?: string } };
-        }).response?.data?.message ?? "Invalid or expired OTP.";
-
-      setError(message);
+      setError(getApiErrorMessage(error, "Invalid or expired OTP."));
     } finally {
       setVerifyLoading(false);
     }
@@ -241,8 +227,8 @@ export function RegisterPage({ navigate }: Props) {
                 );
 
                 navigateAfterGoogleLogin(user.role);
-              } catch {
-                setError("Google registration failed");
+              } catch (error) {
+                setError(getApiErrorMessage(error, "Google registration failed"));
               }
             }}
             onError={() => {
