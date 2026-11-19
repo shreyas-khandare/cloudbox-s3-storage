@@ -20,6 +20,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 
 import { s3 } from "../config/s3";
+import { sendDependencyError } from "../utils/dependency-error";
 
 
 
@@ -111,11 +112,7 @@ export const generateUploadUrl = async (
             key,
         });
     } catch (error) {
-        console.error("Generate Upload URL Error:", error);
-
-        return res.status(500).json({
-            message: "Failed to generate upload URL",
-        });
+        return sendDependencyError(res, error, "Generate upload URL");
     }
 };
 
@@ -227,20 +224,7 @@ export const saveFile = async (
         });
 
     } catch (error) {
-        console.error("Save File Error:", error);
-
-        if (
-            error instanceof Error &&
-            error.message === "STORAGE_LIMIT_EXCEEDED"
-        ) {
-            return res.status(409).json({
-                message: "Storage limit exceeded",
-            });
-        }
-
-        return res.status(500).json({
-            message: "Failed to save file",
-        });
+        return sendDependencyError(res, error, "Save file metadata");
     }
 };
 
@@ -302,18 +286,7 @@ export const getMyFiles = async (
     } catch (error) {
 
 
-        console.log(
-            "Get Files Error:",
-            error
-        );
-
-
-        res.status(500).json({
-
-            message:
-                "Failed to get files"
-
-        });
+        return sendDependencyError(res, error, "List files");
 
 
     }
@@ -403,18 +376,7 @@ export const downloadFile = async (
     } catch (error) {
 
 
-        console.log(
-            "Download Error:",
-            error
-        );
-
-
-        res.status(500).json({
-
-            message:
-                "Failed to generate download URL"
-
-        });
+        return sendDependencyError(res, error, "Generate download URL");
 
 
     }
@@ -491,11 +453,7 @@ export const deleteFile = async (
         });
 
     } catch (error) {
-        console.error("Delete Error:", error);
-
-        return res.status(500).json({
-            message: "Failed to delete file",
-        });
+        return sendDependencyError(res, error, "Delete file");
     }
 };
 
@@ -564,12 +522,7 @@ export const previewFile = async (
 
     } catch (error) {
 
-        console.log(error);
-
-
-        res.status(500).json({
-            message: "Preview failed"
-        });
+        return sendDependencyError(res, error, "Generate preview URL");
 
     }
 
