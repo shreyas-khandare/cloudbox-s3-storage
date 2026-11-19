@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseSubscriptionChargedEvent } from "./razorpay-webhook-payload";
 
-const validPayload = () => ({
+const validPayload = (): any => ({
   event: "subscription.charged",
   payload: {
     subscription: {
