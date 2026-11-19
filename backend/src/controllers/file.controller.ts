@@ -24,6 +24,16 @@ import { sendDependencyError } from "../utils/dependency-error";
 
 const discardStagedUpload = async (key: string, reason: string): Promise<void> => {
     try {
+        // Never remove an object that already has committed file metadata.
+        const existingFile = await prisma.file.findUnique({
+            where: { s3Key: key },
+            select: { id: true },
+        });
+
+        if (existingFile) {
+            return;
+        }
+
         await s3.send(
             new DeleteObjectCommand({
                 Bucket: env.AWS.BUCKET,
