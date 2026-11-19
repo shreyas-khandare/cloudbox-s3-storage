@@ -19,32 +19,40 @@ export const generateAndSendOTP = async (
   const email = emailInput.trim().toLowerCase();
   const now = new Date();
 
-  const recentOTP = await prisma.emailVerificationOTP.findFirst({
-    where: {
-      email,
-      createdAt: {
-        gt: new Date(now.getTime() - RESEND_COOLDOWN_MS),
-      },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-
-  if (recentOTP) {
-    throw new Error(
-      "Please wait before requesting another verification code.",
-    );
-  }
-
   const otp = randomInt(100000, 1000000).toString();
   const codeHash = hashOTP(email, otp);
   const expiresAt = new Date(now.getTime() + OTP_EXPIRY_MS);
 
-  await prisma.emailVerificationOTP.create({
-    data: {
-      email,
-      codeHash,
-      expiresAt,
-    },
+  // Serialize OTP requests for one email so parallel requests cannot bypass
+  // the resend cooldown and send several valid codes at the same time.
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(hashtext(${"otp:" + email}))
+    `;
+
+    const recentOTP = await tx.emailVerificationOTP.findFirst({
+      where: {
+        email,
+        createdAt: {
+          gt: new Date(now.getTime() - RESEND_COOLDOWN_MS),
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (recentOTP) {
+      throw new Error(
+        "Please wait before requesting another verification code.",
+      );
+    }
+
+    await tx.emailVerificationOTP.create({
+      data: {
+        email,
+        codeHash,
+        expiresAt,
+      },
+    });
   });
 
   try {
@@ -82,21 +90,34 @@ export const verifyOTP = async (
     return false;
   }
 
+  const now = new Date();
   const matches = hashOTP(email, otp) === record.codeHash;
 
   if (!matches) {
-    await prisma.emailVerificationOTP.update({
-      where: { id: record.id },
+    // Atomic conditional increment prevents concurrent guesses exceeding the
+    // configured attempt limit or updating an already-verified OTP.
+    await prisma.emailVerificationOTP.updateMany({
+      where: {
+        id: record.id,
+        attempts: { lt: MAX_ATTEMPTS },
+        verifiedAt: null,
+        expiresAt: { gt: now },
+      },
       data: { attempts: { increment: 1 } },
     });
 
     return false;
   }
 
-  const verifiedAt = new Date();
-
-  await prisma.emailVerificationOTP.update({
-    where: { id: record.id },
+  const verifiedAt = now;
+  const result = await prisma.emailVerificationOTP.updateMany({
+    where: {
+      id: record.id,
+      codeHash: record.codeHash,
+      attempts: { lt: MAX_ATTEMPTS },
+      verifiedAt: null,
+      expiresAt: { gt: now },
+    },
     data: {
       verifiedAt,
       registrationGrantExpiresAt: new Date(
@@ -105,5 +126,6 @@ export const verifyOTP = async (
     },
   });
 
-  return true;
+  // Only the first concurrent correct attempt can claim the grant.
+  return result.count === 1;
 };
