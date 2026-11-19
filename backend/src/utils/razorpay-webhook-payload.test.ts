@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseSubscriptionChargedEvent } from "./razorpay-webhook-payload";
+import { parseSubscriptionChargedEvent, unwrapRazorpayWebhookPayload } from "./razorpay-webhook-payload";
 
 const validPayload = (): any => ({
   event: "subscription.charged",
@@ -69,4 +69,22 @@ test("rejects an uncaptured or non-positive payment amount", () => {
     () => parseSubscriptionChargedEvent(wrongAmount),
     /Invalid subscription.charged payload/
   );
+});
+
+test("unwraps the complete Razorpay webhook event envelope", () => {
+  const inner = validPayload();
+  const envelope = {
+    entity: "event",
+    event: "subscription.charged",
+    payload: inner,
+  };
+
+  assert.deepEqual(unwrapRazorpayWebhookPayload(envelope), inner);
+  const parsed = parseSubscriptionChargedEvent(envelope);
+  assert.equal(parsed.subscriptionId, "sub_test_123");
+});
+
+test("keeps an already-unwrapped Razorpay resource payload unchanged", () => {
+  const inner = validPayload();
+  assert.equal(unwrapRazorpayWebhookPayload(inner), inner);
 });
