@@ -3,7 +3,10 @@ import prisma from "../config/prisma";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
-import { MAX_SINGLE_UPLOAD_SIZE } from "../config/upload";
+import {
+    MAX_SINGLE_UPLOAD_SIZE,
+    formatUploadLimitLabel,
+} from "../config/upload";
 
 import {
     PutObjectCommand,
@@ -59,9 +62,7 @@ export const generateUploadUrl = async (
         // Enforce plan-specific maximum file size
         if (fileSize > planConfig.maxFileSize) {
             return res.status(413).json({
-                message: `Your ${planConfig.name} plan allows a maximum file size of ${
-                    planConfig.maxFileSize / (1024 * 1024)
-                } MB`,
+                message: `Your ${planConfig.name} plan allows a maximum file size of ${formatUploadLimitLabel(planConfig.maxFileSize)}.`,
             });
         }
 
