@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 
 import prisma from "../config/prisma";
+import { parseSubscriptionChargedEvent } from "../utils/razorpay-webhook-payload";
 
 import {
     SUBSCRIPTION_PLANS,
@@ -119,51 +120,16 @@ export const activateSubscription = async (
 export const processSubscriptionChargedEvent = async (
   payload: any
 ) => {
-  const subscription = payload?.subscription?.entity;
-  const payment = payload?.payment?.entity;
-
-  if (
-    !subscription?.id ||
-    !payment?.id ||
-    payment.subscription_id !== subscription.id ||
-    payment.status !== "captured" ||
-    !Number.isInteger(payment.amount) ||
-    payment.amount <= 0 ||
-    payment.currency !== "INR" ||
-    !Number.isFinite(payment.created_at) ||
-    !Number.isFinite(subscription.current_start) ||
-    !Number.isFinite(subscription.current_end)
-  ) {
-    throw new Error("Invalid subscription.charged payload");
-  }
-
-  const currentPeriodStart = new Date(
-    subscription.current_start * 1000
-  );
-
-  const currentPeriodEnd = new Date(
-    subscription.current_end * 1000
-  );
-
-  const paidAt = new Date(payment.created_at * 1000);
-
-  if (
-    !Number.isFinite(currentPeriodStart.getTime()) ||
-    !Number.isFinite(currentPeriodEnd.getTime()) ||
-    !Number.isFinite(paidAt.getTime()) ||
-    currentPeriodEnd <= currentPeriodStart
-  ) {
-    throw new Error("Invalid subscription billing period");
-  }
+  const charge = parseSubscriptionChargedEvent(payload);
 
   return activateSubscription(
-    subscription.id,
-    payment.id,
-    payment.amount,
-    payment.currency,
-    paidAt,
-    currentPeriodStart,
-    currentPeriodEnd
+    charge.subscriptionId,
+    charge.paymentId,
+    charge.amount,
+    charge.currency,
+    charge.paidAt,
+    charge.currentPeriodStart,
+    charge.currentPeriodEnd
   );
 };
 
