@@ -1,5 +1,6 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import axios from "axios";
 import { api } from "../services/api";
 
 type User = {
@@ -33,18 +34,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const nextUser = res.data.user as User;
       setUser(nextUser);
       return nextUser;
-    } catch {
-      return null;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        if (status === 401 || status === 404) {
+          setUser(null);
+          return null;
+        }
+      }
+
+      // Preserve the current auth state on transient network/server failures.
+      // Callers can surface the error and offer a retry instead of silently
+      // treating an outage as a signed-out user.
+      throw error;
     }
   }, []);
 
   useEffect(() => {
     const checkAuth = async () => {
-      const currentUser = await refreshUser();
-      if (!currentUser) {
-        setUser(null);
+      try {
+        await refreshUser();
+      } catch (error) {
+        console.error("[Auth] Unable to restore session:", error);
+        // A temporary API outage must not be interpreted as an invalid session.
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     void checkAuth();
