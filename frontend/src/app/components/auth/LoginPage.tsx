@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Cloud, Eye, EyeOff, ArrowRight, AlertCircle } from "lucide-react";
 import type { Page } from "../../App";
 import { api } from "../../../services/api";
+import { getApiErrorMessage } from "../../../services/api-error";
 import { useAuth } from "../../../context/AuthContext";
 import { GoogleLogin } from "@react-oauth/google";
 
@@ -77,10 +78,7 @@ export function LoginPage({ navigate }: Props) {
 
     } catch (err: any) {
 
-      setError(
-        err?.response?.data?.message ||
-        "Invalid email or password"
-      );
+      setError(getApiErrorMessage(err, "Invalid email or password"));
 
     } finally {
 
@@ -186,9 +184,7 @@ export function LoginPage({ navigate }: Props) {
                   navigateAfterLogin(user.role);
                 } catch (error) {
                   console.log(error);
-                  setError(
-                    "Google login failed"
-                  );
+                  setError(getApiErrorMessage(error, "Google login failed"));
                 }
               }}
               onError={() => {
