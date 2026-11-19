@@ -366,8 +366,12 @@ export function UserDashboard({ navigate }: Props) {
     return `${size} bytes`;
   };
 
-  const formatUploadLimit = (bytes: number): string =>
-    bytes === MAX_SINGLE_UPLOAD_SIZE ? "5 GB" : formatSize(bytes);
+  const formatUploadLimit = (bytes: number): string => {
+    if (bytes === 100 * MEGABYTE) return "100 MB";
+    if (bytes === 3 * GIGABYTE) return "3 GB";
+    if (bytes === MAX_SINGLE_UPLOAD_SIZE) return "5 GB";
+    return formatSize(bytes);
+  };
 
   const usedBytes = Number(user?.storageUsed || 0);
   const totalBytes = Number(user?.storageLimit || GIGABYTE);
