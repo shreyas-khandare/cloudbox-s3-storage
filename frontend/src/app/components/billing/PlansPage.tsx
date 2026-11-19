@@ -49,7 +49,10 @@ function formatBytes(value: string | number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
   const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const amount = bytes / Math.pow(1024, index);
-  return `${amount.toFixed(index >= 3 ? 0 : 1)} ${units[index]}`;
+  const formatted = Number.isInteger(amount)
+    ? String(amount)
+    : amount.toFixed(index >= 3 ? 0 : 1);
+  return `${formatted} ${units[index]}`;
 }
 
 function formatPrice(price: number, currency: string): string {
