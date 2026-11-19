@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, CalendarClock, CreditCard, RefreshCw, ReceiptText, ShieldCheck, XCircle } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { api } from "../../../services/api";
+import { getApiErrorMessage } from "../../../services/api-error";
 import type { Page } from "../../App";
 
 type Payment = {
@@ -47,11 +48,6 @@ function formatMoney(amount: number, currency: string): string {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency, maximumFractionDigits: 2 }).format(amount / 100);
 }
 
-function getMessage(error: unknown): string {
-  const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-  return message || (error instanceof Error ? error.message : "Unable to complete the request.");
-}
-
 export function BillingPage({ navigate }: Props) {
   const { user, refreshUser } = useAuth();
   const [overview, setOverview] = useState<BillingOverview | null>(null);
@@ -75,7 +71,7 @@ export function BillingPage({ navigate }: Props) {
     let mounted = true;
     setLoading(true);
     loadBilling()
-      .catch((loadError) => { if (mounted) setError(getMessage(loadError)); })
+      .catch((loadError) => { if (mounted) setError(getApiErrorMessage(loadError, "Unable to load billing information.")); })
       .finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
   }, [loadBilling]);
@@ -87,7 +83,7 @@ export function BillingPage({ navigate }: Props) {
       await Promise.all([loadBilling(), refreshUser()]);
       setNotice("Billing information refreshed.");
     } catch (refreshError) {
-      setError(getMessage(refreshError));
+      setError(getApiErrorMessage(refreshError, "Unable to refresh billing information."));
     } finally {
       setRefreshing(false);
     }
@@ -103,7 +99,7 @@ export function BillingPage({ navigate }: Props) {
       await Promise.all([loadBilling(), refreshUser()]);
       setNotice("Cancellation has been scheduled. Your paid access remains until the current period ends.");
     } catch (cancelError) {
-      setError(getMessage(cancelError));
+      setError(getApiErrorMessage(cancelError, "Unable to cancel the subscription."));
     } finally {
       setCancelling(false);
     }
