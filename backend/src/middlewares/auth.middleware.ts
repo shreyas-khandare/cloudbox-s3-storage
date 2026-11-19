@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { findValidSession } from "../services/session.service";
+import { isServiceUnavailable } from "../utils/dependency-error";
 
 export const protect = async (
     req: Request,
@@ -31,8 +32,10 @@ export const protect = async (
     }catch (error){
         console.error("[Auth Middleware] Session Validation Failed:", error);
 
-        res.status(500).json({
-            message: "Authentication service temporarily unavailable",
+        res.status(isServiceUnavailable(error) ? 503 : 500).json({
+            message: isServiceUnavailable(error)
+                ? "Authentication service is temporarily unavailable. Please retry."
+                : "Unable to validate the current session.",
         });
     }
 };
