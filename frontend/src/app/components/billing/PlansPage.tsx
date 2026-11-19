@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Check, CreditCard, ShieldCheck, Sparkles, Loader
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
 import { api } from "../../../services/api";
+import { getApiErrorMessage } from "../../../services/api-error";
 import type { Page } from "../../App";
 
 type PlanId = "FREE" | "PRO" | "BUSINESS";
@@ -63,11 +64,6 @@ function formatPrice(price: number, currency: string): string {
   }).format(price / 100);
 }
 
-function errorMessage(error: unknown): string {
-  const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
-  return message || (error instanceof Error ? error.message : "Something went wrong. Please try again.");
-}
-
 export function PlansPage({ navigate }: Props) {
   const { user, refreshUser } = useAuth();
   const location = useLocation();
@@ -98,7 +94,7 @@ export function PlansPage({ navigate }: Props) {
     setLoading(true);
     Promise.all([loadData(), userId ? refreshUser() : Promise.resolve(null)])
       .catch((loadError) => {
-        if (mounted) setError(errorMessage(loadError));
+        if (mounted) setError(getApiErrorMessage(loadError, "Unable to load plans."));
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -174,7 +170,7 @@ export function PlansPage({ navigate }: Props) {
       }));
       setNotice(`${plan.name} subscription created. Continue to Razorpay to authorize the recurring payment.`);
     } catch (requestError) {
-      setError(errorMessage(requestError));
+      setError(getApiErrorMessage(requestError, "Unable to complete the plan request."));
     } finally {
       setActionPlan(null);
     }
@@ -186,7 +182,7 @@ export function PlansPage({ navigate }: Props) {
       await Promise.all([loadData(), refreshUser()]);
       setNotice("Subscription status refreshed. Paid access is enabled only after Razorpay confirms the payment.");
     } catch (requestError) {
-      setError(errorMessage(requestError));
+      setError(getApiErrorMessage(requestError, "Unable to complete the plan request."));
     }
   };
 
