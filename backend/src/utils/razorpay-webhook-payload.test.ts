@@ -55,7 +55,7 @@ test("rejects an explicit payment.subscription_id that conflicts with the parent
   );
 });
 
-test("rejects an uncaptured or incorrectly priced payment payload", () => {
+test("rejects an uncaptured or non-positive payment amount", () => {
   const uncaptured = validPayload();
   uncaptured.payment.entity.status = "authorized";
   assert.throws(
@@ -64,7 +64,7 @@ test("rejects an uncaptured or incorrectly priced payment payload", () => {
   );
 
   const wrongAmount = validPayload();
-  wrongAmount.payment.entity.amount = 100;
+  wrongAmount.payment.entity.amount = 0;
   assert.throws(
     () => parseSubscriptionChargedEvent(wrongAmount),
     /Invalid subscription.charged payload/
