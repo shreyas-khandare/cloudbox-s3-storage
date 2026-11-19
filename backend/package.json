@@ -7,7 +7,7 @@
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "tsx --test src/config/subscription-plans.test.ts src/utils/razorpay-webhook-signature.test.ts"
+    "test": "tsx --test src/config/subscription-plans.test.ts src/utils/razorpay-webhook-signature.test.ts src/middlewares/error.middleware.test.ts src/utils/dependency-error.test.ts"
   },
   "keywords": [],
   "author": "",
