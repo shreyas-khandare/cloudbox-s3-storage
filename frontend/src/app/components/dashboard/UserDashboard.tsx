@@ -5,6 +5,7 @@ import {
   useCallback,
 } from "react";
 import { api } from "../../../services/api";
+import { getApiErrorMessage } from "../../../services/api-error";
 import { useAuth } from "../../../context/AuthContext";
 import {
   Cloud, FolderOpen, Clock, HardDrive, LogOut, Search,
@@ -133,20 +134,8 @@ export function UserDashboard({ navigate }: Props) {
     void fetchSubscriptionPlans();
   }, [fetchFiles, fetchSubscriptionPlans]);
 
-  const getErrorMessage = (error: unknown, fallback: string): string => {
-    if (typeof error === "object" && error !== null && "response" in error) {
-      const response = (error as { response?: { data?: { message?: unknown } } }).response;
-      if (typeof response?.data?.message === "string") {
-        return response.data.message;
-      }
-    }
-
-    if (error instanceof Error && error.message) {
-      return error.message;
-    }
-
-    return fallback;
-  };
+  const getErrorMessage = (error: unknown, fallback: string): string =>
+    getApiErrorMessage(error, fallback);
 
   const filteredFiles = files
     .filter((file) =>
@@ -325,7 +314,7 @@ export function UserDashboard({ navigate }: Props) {
     } catch (error) {
       console.error("Preview failed:", error);
       previewWindow.close();
-      alert("Preview failed");
+      alert(getErrorMessage(error, "Preview failed. Please try again."));
     }
   };
 
