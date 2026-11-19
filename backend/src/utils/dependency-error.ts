@@ -103,3 +103,41 @@ export const sendDependencyError = (
     message: failure.message,
   });
 };
+
+export const isServiceUnavailable = (error: unknown): boolean => {
+  const record =
+    error && typeof error === "object"
+      ? (error as DependencyError)
+      : null;
+  const code =
+    typeof record?.code === "string"
+      ? record.code
+      : typeof record?.Code === "string"
+        ? record.Code
+        : "";
+  const name = typeof record?.name === "string" ? record.name : "";
+  const providerStatus =
+    typeof record?.$metadata?.httpStatusCode === "number"
+      ? record.$metadata.httpStatusCode
+      : typeof record?.statusCode === "number"
+        ? record.statusCode
+        : typeof record?.status === "number"
+          ? record.status
+          : null;
+
+  return (
+    name === "PrismaClientInitializationError" ||
+    name === "TimeoutError" ||
+    ["P1001", "P1002", "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "EAI_AGAIN", "ENETUNREACH"].includes(code) ||
+    providerStatus === 429 ||
+    (providerStatus !== null && providerStatus >= 500)
+  );
+};
+
+export const isUniqueConstraintViolation = (error: unknown): boolean =>
+  Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "P2002"
+  );
