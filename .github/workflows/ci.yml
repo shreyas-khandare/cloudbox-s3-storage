@@ -35,6 +35,12 @@ jobs:
         working-directory: backend
         run: pnpm install --frozen-lockfile
 
+      - name: Generate Prisma Client
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cloudbox?schema=public
+        run: pnpm exec prisma generate
+
       - name: Test backend plan limits
         working-directory: backend
         run: pnpm test
