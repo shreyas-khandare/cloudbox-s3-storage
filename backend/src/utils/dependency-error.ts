@@ -32,7 +32,7 @@ export const getDependencyFailure = (error: unknown) => {
           ? record.status
           : null;
 
-  if (code === "STORAGE_LIMIT_EXCEEDED") {
+  if (code === "STORAGE_LIMIT_EXCEEDED" || message === "STORAGE_LIMIT_EXCEEDED") {
     return { status: 409, message: "Storage limit exceeded" };
   }
 
