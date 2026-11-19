@@ -335,7 +335,7 @@ export const processRazorpayWebhookEvent = async (
     // The database stores the complete signed Razorpay event envelope.
     // Normalize it once before dispatching to handlers that consume the
     // inner resource payload (subscription/payment entities).
-    const eventPayload = unwrapRazorpayWebhookPayload(eventPayload);
+    const eventPayload = unwrapRazorpayWebhookPayload(webhookEvent.payload);
 
     switch (webhookEvent.eventType) {
       case "subscription.charged":
