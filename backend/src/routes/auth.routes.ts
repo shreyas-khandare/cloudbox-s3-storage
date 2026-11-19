@@ -1,4 +1,4 @@
-
+ 
 import express from "express";
 import { protect } from "../middlewares/auth.middleware";
 import { validate } from "../middlewares/validate.middleware";
@@ -35,8 +35,11 @@ router.post("/login", authLimiter, validate(loginSchema), login);
 // Google authentication
 router.post("/google", authLimiter, googleLogin);
 
+// Logout is intentionally public: an expired/invalid session must still be
+// able to clear the browser cookie.
+router.post("/logout", logout);
+
 // Protected routes
 router.get("/me", protect, getMe);
-router.post("/logout", protect, logout);
 
 export default router;
