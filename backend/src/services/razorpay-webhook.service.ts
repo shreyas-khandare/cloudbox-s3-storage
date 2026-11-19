@@ -6,7 +6,7 @@ import {
 } from "@prisma/client";
 
 import prisma from "../config/prisma";
-import { parseSubscriptionChargedEvent } from "../utils/razorpay-webhook-payload";
+import { parseSubscriptionChargedEvent, unwrapRazorpayWebhookPayload } from "../utils/razorpay-webhook-payload";
 
 import {
     SUBSCRIPTION_PLANS,
@@ -332,33 +332,38 @@ export const processRazorpayWebhookEvent = async (
   }
 
   try {
+    // The database stores the complete signed Razorpay event envelope.
+    // Normalize it once before dispatching to handlers that consume the
+    // inner resource payload (subscription/payment entities).
+    const eventPayload = unwrapRazorpayWebhookPayload(eventPayload);
+
     switch (webhookEvent.eventType) {
       case "subscription.charged":
-        await processSubscriptionChargedEvent(webhookEvent.payload);
+        await processSubscriptionChargedEvent(eventPayload);
         break;
 
       case "subscription.activated":
-        await processSubscriptionActivatedEvent(webhookEvent.payload);
+        await processSubscriptionActivatedEvent(eventPayload);
         break;
 
       case "payment.failed":
-        await processPaymentFailedEvent(webhookEvent.payload);
+        await processPaymentFailedEvent(eventPayload);
         break;
 
       case "subscription.cancelled":
-        await processSubscriptionCancelledEvent(webhookEvent.payload);
+        await processSubscriptionCancelledEvent(eventPayload);
         break;
 
       case "subscription.pending":
-        await processSubscriptionPendingEvent(webhookEvent.payload);
+        await processSubscriptionPendingEvent(eventPayload);
         break;
 
       case "subscription.halted":
-        await processSubscriptionHaltedEvent(webhookEvent.payload);
+        await processSubscriptionHaltedEvent(eventPayload);
         break;
 
       case "subscription.resumed":
-        await processSubscriptionResumedEvent(webhookEvent.payload);
+        await processSubscriptionResumedEvent(eventPayload);
         break;
 
       default:
