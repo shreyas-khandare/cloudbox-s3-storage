@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, CreditCard, ShieldCheck, Sparkles, LoaderCircle, RefreshCw } from "lucide-react";
+import { ArrowLeft, Check, CreditCard, ShieldCheck, Sparkles, LoaderCircle, RefreshCw } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
 import { api } from "../../../services/api";
@@ -72,8 +72,6 @@ export function PlansPage({ navigate }: Props) {
   const [overview, setOverview] = useState<SubscriptionOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionPlan, setActionPlan] = useState<PlanId | null>(null);
-  const [checkoutUrl, setCheckoutUrl] = useState("");
-  const [checkoutPlan, setCheckoutPlan] = useState<PlanId | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const pollCount = useRef(0);
@@ -147,8 +145,6 @@ export function PlansPage({ navigate }: Props) {
     }
 
     setActionPlan(plan.id);
-    setCheckoutUrl("");
-    setCheckoutPlan(null);
 
     try {
       const response = await api.post("/subscriptions", { plan: plan.id });
@@ -159,8 +155,6 @@ export function PlansPage({ navigate }: Props) {
         throw new Error("Razorpay did not return a valid hosted checkout URL.");
       }
 
-      setCheckoutUrl(url);
-      setCheckoutPlan(plan.id);
       setOverview((current) => ({
         plan: current?.plan ?? user.plan,
         subscriptionStatus: "CREATED",
@@ -168,7 +162,9 @@ export function PlansPage({ navigate }: Props) {
         gracePeriodEnd: current?.gracePeriodEnd ?? null,
         currentSubscription: result.subscription,
       }));
-      setNotice(`${plan.name} subscription created. Continue to Razorpay to authorize the recurring payment.`);
+
+      // Navigate in the same tab so the hosted checkout is not blocked as a popup.
+      window.location.assign(url);
     } catch (requestError) {
       setError(getApiErrorMessage(requestError, "Unable to complete the plan request."));
     } finally {
@@ -237,25 +233,13 @@ export function PlansPage({ navigate }: Props) {
               <p className="font-semibold text-amber-900">Subscription status: {pendingSubscription.status.replace("_", " ")}</p>
               <p className="mt-1 text-sm text-amber-800">
                 {pendingSubscription.status === "CREATED"
-                  ? "Your subscription is awaiting payment authorization. Complete the Razorpay checkout tab you opened earlier. If you closed it, do not create another subscription; check Billing before retrying."
+                  ? "Your subscription is awaiting payment authorization. If you have already completed Razorpay checkout, wait for webhook confirmation and refresh your billing status. Do not create another subscription."
                   : "Razorpay has reported a payment issue. Check your billing details or review your payment history."}
               </p>
             </div>
             <button onClick={refreshStatus} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900">
               <RefreshCw className="h-4 w-4" /> Refresh status
             </button>
-          </section>
-        )}
-
-        {checkoutUrl && checkoutPlan && (
-          <section className="mx-auto mb-8 max-w-4xl rounded-2xl border border-[#DCD9FF] bg-white p-5 shadow-sm sm:flex sm:items-center sm:justify-between">
-            <div>
-              <p className="font-semibold text-[#1A1A2E]">Continue with {checkoutPlan === "PRO" ? "Pro" : "Business"}</p>
-              <p className="mt-1 text-sm text-[#6B6B8A]">Razorpay hosts the payment and recurring mandate authorization. Keep this tab open so you can return and refresh your subscription status.</p>
-            </div>
-            <a href={checkoutUrl} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex shrink-0 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold text-white accent-gradient sm:mt-0">
-              Continue to Razorpay <ArrowRight className="h-4 w-4" />
-            </a>
           </section>
         )}
 
