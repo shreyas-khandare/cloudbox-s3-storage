@@ -1,7 +1,10 @@
 import prisma from "../config/prisma";
 import { env } from "../config/env";
 import { Plan, SubscriptionStatus } from "@prisma/client";
-import { createRazorpaySubscription } from "./razorpay.service";
+import {
+  createRazorpaySubscription,
+  cancelRazorpaySubscription,
+} from "./razorpay.service";
 
 export const createSubscription = async (
   userId: string,
@@ -56,22 +59,40 @@ export const createSubscription = async (
     userId
   );
 
-  // Save subscription in PostgreSQL
-  const subscription = await prisma.subscription.create({
-    data: {
-      userId,
-      plan,
-      razorpayPlanId,
-      razorpaySubscriptionId: razorpaySubscription.id,
-      status: SubscriptionStatus.CREATED,
-    },
-  });
+  // Persist the provider subscription locally. If PostgreSQL rejects the
+  // write (for example, a concurrent request wins the one-open-subscription
+  // constraint), immediately cancel the external subscription as compensation.
+  try {
+    const subscription = await prisma.subscription.create({
+      data: {
+        userId,
+        plan,
+        razorpayPlanId,
+        razorpaySubscriptionId: razorpaySubscription.id,
+        status: SubscriptionStatus.CREATED,
+      },
+    });
 
-  return {
-    subscription,
-    razorpay: {
-      id: razorpaySubscription.id,
-      shortUrl: razorpaySubscription.short_url,
-    },
-  };
+    return {
+      subscription,
+      razorpay: {
+        id: razorpaySubscription.id,
+        shortUrl: razorpaySubscription.short_url,
+      },
+    };
+  } catch (persistenceError) {
+    try {
+      await cancelRazorpaySubscription(razorpaySubscription.id, false);
+    } catch (compensationError) {
+      console.error("[Billing] Failed to cancel orphaned Razorpay subscription:", {
+        subscriptionId: razorpaySubscription.id,
+        error:
+          compensationError instanceof Error
+            ? compensationError.message
+            : "Unknown compensation error",
+      });
+    }
+
+    throw persistenceError;
+  }
 };
