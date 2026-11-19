@@ -9,6 +9,7 @@ testCase("maps missing S3 objects to 404", () => {
 
 testCase("maps storage quota conflicts to 409", () => {
   assert.equal(getDependencyFailure({ code: "STORAGE_LIMIT_EXCEEDED" }).status, 409);
+  assert.equal(getDependencyFailure(new Error("STORAGE_LIMIT_EXCEEDED")).status, 409);
 });
 
 testCase("maps Prisma uniqueness conflicts to 409", () => {
