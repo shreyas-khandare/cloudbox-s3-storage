@@ -7,11 +7,19 @@ import {
 import prisma from "../config/prisma";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
 
-export const expireSubscriptions = async () => {
+type ExpireSubscriptionOptions = {
+  userId?: string;
+};
+
+export const expireSubscriptions = async (
+  options: ExpireSubscriptionOptions = {}
+) => {
+  const { userId } = options;
   const now = new Date();
 
   const expiredSubscriptions = await prisma.subscription.findMany({
     where: {
+      ...(userId ? { userId } : {}),
       OR: [
         {
           status: {
