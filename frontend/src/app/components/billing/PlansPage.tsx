@@ -25,6 +25,7 @@ type Subscription = {
   currentPeriodStart?: string | null;
   currentPeriodEnd?: string | null;
   cancelAtPeriodEnd?: boolean;
+  checkoutUrl?: string | null;
   createdAt?: string;
 };
 
@@ -40,7 +41,7 @@ interface Props {
   navigate: (page: Page) => void;
 }
 
-const ACTIVE_OR_PENDING_STATUSES = ["CREATED", "ACTIVE", "PAST_DUE", "HALTED"];
+const ACTIVE_OR_PENDING_STATUSES = ["CREATED", "ACTIVE", "PAST_DUE", "HALTED", "REFUNDED"];
 const MAX_SINGLE_UPLOAD_SIZE = 5_000_000_000;
 
 function formatBytes(value: string | number): string {
@@ -227,19 +228,36 @@ export function PlansPage({ navigate }: Props) {
           <div role="status" className="mx-auto mb-5 max-w-3xl rounded-xl border border-[#DCD9FF] bg-white px-4 py-3 text-sm text-[#45418D]">{notice}</div>
         )}
 
-        {user && pendingSubscription && ["CREATED", "PAST_DUE", "HALTED"].includes(pendingSubscription.status) && (
+        {user && pendingSubscription && ["CREATED", "PAST_DUE", "HALTED", "REFUNDED"].includes(pendingSubscription.status) && (
           <section className="mx-auto mb-8 flex max-w-4xl flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-semibold text-amber-900">Subscription status: {pendingSubscription.status.replace("_", " ")}</p>
               <p className="mt-1 text-sm text-amber-800">
                 {pendingSubscription.status === "CREATED"
-                  ? "Your subscription is awaiting payment authorization. If you have already completed Razorpay checkout, wait for webhook confirmation and refresh your billing status. Do not create another subscription."
-                  : "Razorpay has reported a payment issue. Check your billing details or review your payment history."}
+                  ? "Your subscription is awaiting payment authorization. Resume checkout or refresh the status after payment. Do not create another subscription."
+                  : pendingSubscription.status === "REFUNDED"
+                    ? "A full refund has been recorded and paid access is revoked. Manage Billing to cancel any remaining provider subscription."
+                    : "Razorpay has reported a payment issue. Check your billing details or review your payment history."}
               </p>
             </div>
-            <button onClick={refreshStatus} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900">
-              <RefreshCw className="h-4 w-4" /> Refresh status
-            </button>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {pendingSubscription.status === "CREATED" && pendingSubscription.checkoutUrl && (
+                <button
+                  onClick={() => window.location.assign(pendingSubscription.checkoutUrl!)}
+                  className="inline-flex items-center justify-center rounded-xl bg-amber-900 px-4 py-2 text-sm font-semibold text-white"
+                >
+                  Resume checkout
+                </button>
+              )}
+              {pendingSubscription.status === "REFUNDED" && (
+                <button onClick={() => navigate("billing")} className="inline-flex items-center justify-center rounded-xl border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900">
+                  Manage billing
+                </button>
+              )}
+              <button onClick={refreshStatus} className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900">
+                <RefreshCw className="h-4 w-4" /> Refresh status
+              </button>
+            </div>
           </section>
         )}
 
