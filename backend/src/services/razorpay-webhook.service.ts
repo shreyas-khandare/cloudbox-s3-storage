@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 
 import prisma from "../config/prisma";
+import { processRefundProcessedEvent } from "./razorpay-refund.service";
 import { parseSubscriptionChargedEvent, unwrapRazorpayWebhookPayload } from "../utils/razorpay-webhook-payload";
 
 import {
@@ -63,6 +64,14 @@ export const activateSubscription = async (
         throw new Error(
           "Payment does not belong to this subscription"
         );
+      }
+
+      if (
+        existingPayment.status === PaymentStatus.REFUNDED ||
+        existingPayment.status === PaymentStatus.PARTIALLY_REFUNDED
+      ) {
+        // A delayed charged event must never undo an already-recorded refund.
+        return { duplicate: true, refunded: true };
       }
 
       if (existingPayment.status !== PaymentStatus.CAPTURED) {
@@ -166,7 +175,11 @@ export const handlePaymentFailure = async (
     });
 
     // Never overwrite a successfully captured payment.
-    if (existingPayment?.status === PaymentStatus.CAPTURED) {
+    if (
+      existingPayment?.status === PaymentStatus.CAPTURED ||
+      existingPayment?.status === PaymentStatus.REFUNDED ||
+      existingPayment?.status === PaymentStatus.PARTIALLY_REFUNDED
+    ) {
       return { duplicate: true };
     }
 
@@ -251,10 +264,12 @@ export const processPaymentFailedEvent = async (
     payload: any
 ) => {
     const payment = payload?.payment?.entity;
+    const subscriptionId =
+      payment?.subscription_id ?? payload?.subscription?.entity?.id;
 
     if (
         !payment?.id ||
-        !payment?.subscription_id ||
+        !subscriptionId ||
         payment.status !== "failed" ||
         !Number.isInteger(payment.amount) ||
         typeof payment.currency !== "string"
@@ -263,7 +278,7 @@ export const processPaymentFailedEvent = async (
     }
 
     return handlePaymentFailure(
-        payment.subscription_id,
+        subscriptionId,
         payment.id,
         payment.amount,
         payment.currency,
@@ -348,6 +363,10 @@ export const processRazorpayWebhookEvent = async (
 
       case "payment.failed":
         await processPaymentFailedEvent(eventPayload);
+        break;
+
+      case "refund.processed":
+        await processRefundProcessedEvent(eventPayload);
         break;
 
       case "subscription.cancelled":
@@ -454,9 +473,12 @@ export const processSubscriptionActivatedEvent = async (
 
     if (
       subscription.status === SubscriptionStatus.CANCELLED ||
-      subscription.status === SubscriptionStatus.EXPIRED
+      subscription.status === SubscriptionStatus.EXPIRED ||
+      subscription.status === SubscriptionStatus.PAST_DUE ||
+      subscription.status === SubscriptionStatus.HALTED ||
+      subscription.status === SubscriptionStatus.REFUNDED
     ) {
-      return { ignored: true };
+      return { ignored: true, awaitingCharge: true };
     }
 
     if (
@@ -592,7 +614,8 @@ export const processSubscriptionPendingEvent = async (
       subscription.status === SubscriptionStatus.CANCELLED ||
       subscription.status === SubscriptionStatus.EXPIRED ||
       subscription.status === SubscriptionStatus.ACTIVE ||
-      subscription.status === SubscriptionStatus.HALTED
+      subscription.status === SubscriptionStatus.HALTED ||
+      subscription.status === SubscriptionStatus.REFUNDED
     ) {
       return { ignored: true };
     }
@@ -647,7 +670,8 @@ export const processSubscriptionHaltedEvent = async (
     if (
       subscription.status === SubscriptionStatus.CANCELLED ||
       subscription.status === SubscriptionStatus.EXPIRED ||
-      subscription.status === SubscriptionStatus.ACTIVE
+      subscription.status === SubscriptionStatus.ACTIVE ||
+      subscription.status === SubscriptionStatus.REFUNDED
     ) {
       return { ignored: true };
     }
@@ -707,7 +731,8 @@ export const processSubscriptionResumedEvent = async (
 
   if (
     subscription.status === SubscriptionStatus.CANCELLED ||
-    subscription.status === SubscriptionStatus.EXPIRED
+    subscription.status === SubscriptionStatus.EXPIRED ||
+    subscription.status === SubscriptionStatus.REFUNDED
   ) {
     return { ignored: true };
   }
