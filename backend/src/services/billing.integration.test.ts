@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import dotenv from "dotenv";
 import test from "node:test";
+import type { Prisma } from "@prisma/client";
 
 dotenv.config();
 
@@ -80,10 +81,13 @@ const getRuntime = (): Promise<TestRuntime> => {
   return runtimePromise;
 };
 
-const envelope = (event: string, payload: Record<string, unknown>) => ({
+const envelope = (
+  event: string,
+  payload: Record<string, unknown>
+): Prisma.InputJsonObject => ({
   entity: "event",
   event,
-  payload,
+  payload: payload as unknown as Prisma.InputJsonObject,
 });
 
 test("billing integration: checkout persistence, webhook idempotency, and refunds", async (t) => {
