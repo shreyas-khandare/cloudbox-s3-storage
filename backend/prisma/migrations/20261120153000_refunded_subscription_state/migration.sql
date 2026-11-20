@@ -6,4 +6,4 @@ DROP INDEX IF EXISTS "Subscription_one_open_per_user_key";
 
 CREATE UNIQUE INDEX "Subscription_one_open_per_user_key"
 ON "Subscription"("userId")
-WHERE "status"::text IN ('CREATED', 'ACTIVE', 'PAST_DUE', 'HALTED', 'REFUNDED');
+WHERE "status" IN ('CREATED', 'ACTIVE', 'PAST_DUE', 'HALTED', 'REFUNDED');
