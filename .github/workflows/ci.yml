@@ -15,6 +15,20 @@ jobs:
   backend:
     name: Backend tests and TypeScript build
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cloudbox
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cloudbox"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,9 +55,22 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cloudbox?schema=public
         run: pnpm exec prisma generate
 
-      - name: Test backend plan limits
+      - name: Apply database migrations to disposable CI PostgreSQL
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cloudbox?schema=public
+        run: pnpm exec prisma migrate deploy
+
+      - name: Test backend unit suite
         working-directory: backend
         run: pnpm test
+
+      - name: Test billing integration against disposable CI PostgreSQL
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cloudbox?schema=public
+          CLOUDBOX_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cloudbox?schema=public
+        run: pnpm test:integration
 
       - name: Build backend
         working-directory: backend
