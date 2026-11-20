@@ -215,6 +215,75 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       },
     };
 
+    await t.test("the database rejects simultaneous open subscriptions and compensates the losing provider subscription", async () => {
+      const raceUser = await prisma.user.create({
+        data: {
+          name: "CloudBox Concurrent Checkout Test",
+          email: `phase1-race-${prefix}@example.test`,
+          emailVerified: true,
+        },
+        select: { id: true },
+      });
+
+      let providerCreateCalls = 0;
+      const cancelledProviderIds: string[] = [];
+      let releaseProviderCreates: () => void = () => undefined;
+      const bothProviderCreatesStarted = new Promise<void>((resolve) => {
+        releaseProviderCreates = resolve;
+      });
+
+      const gateway = {
+        create: async () => {
+          providerCreateCalls += 1;
+          const attempt = providerCreateCalls;
+          if (attempt === 2) releaseProviderCreates();
+          await bothProviderCreatesStarted;
+          return {
+            id: `sub_phase1_race_${prefix}_${attempt}`,
+            short_url: `https://rzp.io/i/race-${prefix}-${attempt}`,
+          };
+        },
+        cancel: async (id: string) => {
+          cancelledProviderIds.push(id);
+        },
+      };
+
+      try {
+        const results = await Promise.allSettled([
+          createSubscription(raceUser.id, Plan.PRO, gateway),
+          createSubscription(raceUser.id, Plan.BUSINESS, gateway),
+        ]);
+
+        assert.equal(providerCreateCalls, 2);
+        assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+        assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+        assert.equal(cancelledProviderIds.length, 1);
+
+        const openSubscriptions = await prisma.subscription.count({
+          where: {
+            userId: raceUser.id,
+            status: {
+              in: [
+                SubscriptionStatus.CREATED,
+                SubscriptionStatus.ACTIVE,
+                SubscriptionStatus.PAST_DUE,
+                SubscriptionStatus.HALTED,
+                SubscriptionStatus.REFUNDED,
+              ],
+            },
+          },
+        });
+        assert.equal(openSubscriptions, 1);
+      } finally {
+        const raceRows = await prisma.subscription.findMany({
+          where: { userId: raceUser.id },
+          select: { id: true },
+        });
+        await prisma.subscription.deleteMany({ where: { userId: raceUser.id } });
+        await prisma.user.delete({ where: { id: raceUser.id } });
+      }
+    });
+
     await t.test("processes the first captured charge and grants the Pro entitlement", async () => {
       const eventId = await saveWebhook(
         "subscription.charged",
@@ -406,6 +475,68 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       assert.equal(payment?.status, PaymentStatus.REFUNDED);
       assert.equal(updatedUser?.plan, Plan.FREE);
       assert.equal(subscription?.status, SubscriptionStatus.REFUNDED);
+    });
+    await t.test("expires a refunded subscription after end-of-period cancellation", async () => {
+      const { expireSubscriptions } = await import("./subscription-expiry.service");
+
+      await prisma.subscription.update({
+        where: { razorpaySubscriptionId },
+        data: {
+          status: SubscriptionStatus.REFUNDED,
+          cancelAtPeriodEnd: true,
+          currentPeriodEnd: new Date(Date.now() - 1000),
+        },
+      });
+
+      const processed = await expireSubscriptions();
+      assert.equal(processed, 1);
+
+      const [subscription, updatedUser] = await Promise.all([
+        prisma.subscription.findUnique({
+          where: { razorpaySubscriptionId },
+        }),
+        prisma.user.findUnique({ where: { id: user.id } }),
+      ]);
+
+      assert.equal(subscription?.status, SubscriptionStatus.CANCELLED);
+      assert.equal(updatedUser?.plan, Plan.FREE);
+    });
+
+    await t.test("expires HALTED subscriptions when the grace period ends", async () => {
+      const haltedSubscriptionId = `sub_phase1_halted_${prefix}`;
+      await prisma.subscription.create({
+        data: {
+          userId: user.id,
+          plan: Plan.BUSINESS,
+          razorpayPlanId: "plan_test_business",
+          razorpaySubscriptionId: haltedSubscriptionId,
+          status: SubscriptionStatus.HALTED,
+          gracePeriodEnd: new Date(Date.now() - 1000),
+        },
+      });
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          plan: Plan.BUSINESS,
+          subscriptionStatus: SubscriptionStatus.HALTED,
+          storageLimit: 1024n * 1024n * 1024n * 1024n,
+          gracePeriodEnd: new Date(Date.now() - 1000),
+        },
+      });
+
+      const { expireSubscriptions } = await import("./subscription-expiry.service");
+      const processed = await expireSubscriptions();
+      assert.equal(processed, 1);
+
+      const [subscription, updatedUser] = await Promise.all([
+        prisma.subscription.findUnique({
+          where: { razorpaySubscriptionId: haltedSubscriptionId },
+        }),
+        prisma.user.findUnique({ where: { id: user.id } }),
+      ]);
+
+      assert.equal(subscription?.status, SubscriptionStatus.EXPIRED);
+      assert.equal(updatedUser?.plan, Plan.FREE);
     });
   } finally {
     if (webhookEventIds.length) {
