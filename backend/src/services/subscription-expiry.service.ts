@@ -25,7 +25,9 @@ export const expireSubscriptions = async () => {
           },
         },
         {
-          status: SubscriptionStatus.ACTIVE,
+          status: {
+            in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.REFUNDED],
+          },
           cancelAtPeriodEnd: true,
           currentPeriodEnd: {
             lte: now,
@@ -58,7 +60,10 @@ export const expireSubscriptions = async () => {
         currentSubscription.gracePeriodEnd <= now;
 
       const isScheduledCancellationExpired =
-        currentSubscription.status === SubscriptionStatus.ACTIVE &&
+        (
+          currentSubscription.status === SubscriptionStatus.ACTIVE ||
+          currentSubscription.status === SubscriptionStatus.REFUNDED
+        ) &&
         currentSubscription.cancelAtPeriodEnd &&
         currentSubscription.currentPeriodEnd !== null &&
         currentSubscription.currentPeriodEnd <= now;
