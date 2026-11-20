@@ -159,6 +159,7 @@ export const getMySubscriptionController = async (
             currentPeriodStart: true,
             currentPeriodEnd: true,
             cancelAtPeriodEnd: true,
+            checkoutUrl: true,
             createdAt: true,
           },
         },
@@ -206,6 +207,7 @@ export const getPaymentHistoryController = async (
         amount: true,
         currency: true,
         status: true,
+        amountRefunded: true,
         paidAt: true,
         failureReason: true,
         createdAt: true,
@@ -237,7 +239,14 @@ export const cancelSubscriptionController = async (
     subscription = await prisma.subscription.findFirst({
       where: {
         userId,
-        status: SubscriptionStatus.ACTIVE,
+        status: {
+          in: [
+            SubscriptionStatus.ACTIVE,
+            SubscriptionStatus.PAST_DUE,
+            SubscriptionStatus.HALTED,
+            SubscriptionStatus.REFUNDED,
+          ],
+        },
       },
       orderBy: {
         createdAt: "desc",
@@ -252,42 +261,102 @@ export const cancelSubscriptionController = async (
 
   if (!subscription) {
     return res.status(404).json({
-      message: "No active subscription found",
-    });
-  }
-
-  if (
-    !subscription.currentPeriodEnd ||
-    subscription.currentPeriodEnd <= new Date()
-  ) {
-    return res.status(400).json({
-      message: "Subscription has no valid active billing period",
+      message: "No cancellable subscription found",
     });
   }
 
   if (subscription.cancelAtPeriodEnd) {
-    return res.status(400).json({
+    return res.status(200).json({
       message: "Subscription cancellation is already scheduled",
+      cancelAtPeriodEnd: true,
+      currentPeriodEnd: subscription.currentPeriodEnd,
     });
   }
 
-  // First ask Razorpay to schedule cancellation. Do not change local state
-  // unless the provider accepts the request.
+  const now = new Date();
+  const keepAccessUntilPeriodEnd =
+    subscription.currentPeriodEnd !== null &&
+    subscription.currentPeriodEnd > now;
+
+  // If a future paid period remains, schedule cancellation for its end.
+  // Past-due/halted/refunded subscriptions whose period has ended are
+  // cancelled immediately, removing the provider's future billing schedule.
   try {
-    await cancelRazorpaySubscription(subscription.razorpaySubscriptionId);
+    await cancelRazorpaySubscription(
+      subscription.razorpaySubscriptionId,
+      keepAccessUntilPeriodEnd
+    );
   } catch (error) {
     console.error("[Billing] Razorpay rejected cancellation:", error);
     return res.status(502).json({
-      message: "Razorpay could not schedule the cancellation. No local billing changes were made.",
+      message: "Razorpay could not cancel the subscription. No local billing changes were made.",
     });
   }
 
-  // The provider accepted the request; persist the matching local flag.
   try {
-    await prisma.subscription.update({
-      where: { id: subscription.id },
-      data: { cancelAtPeriodEnd: true },
-    });
+    if (keepAccessUntilPeriodEnd) {
+      await prisma.subscription.update({
+        where: { id: subscription.id },
+        data: { cancelAtPeriodEnd: true },
+      });
+    } else {
+      await prisma.$transaction(async (tx) => {
+        await tx.subscription.update({
+          where: { id: subscription.id },
+          data: {
+            status: SubscriptionStatus.CANCELLED,
+            cancelledAt: now,
+            endDate: now,
+            cancelAtPeriodEnd: false,
+            gracePeriodEnd: null,
+          },
+        });
+
+        const anotherEntitledSubscription = await tx.subscription.findFirst({
+          where: {
+            userId,
+            id: { not: subscription.id },
+            status: {
+              in: [
+                SubscriptionStatus.ACTIVE,
+                SubscriptionStatus.PAST_DUE,
+                SubscriptionStatus.HALTED,
+              ],
+            },
+          },
+          select: {
+            plan: true,
+            status: true,
+            currentPeriodEnd: true,
+            gracePeriodEnd: true,
+          },
+        });
+
+        if (anotherEntitledSubscription) {
+          await tx.user.update({
+            where: { id: userId },
+            data: {
+              plan: anotherEntitledSubscription.plan,
+              subscriptionStatus: anotherEntitledSubscription.status,
+              currentPeriodEnd: anotherEntitledSubscription.currentPeriodEnd,
+              gracePeriodEnd: anotherEntitledSubscription.gracePeriodEnd,
+              storageLimit: SUBSCRIPTION_PLANS[anotherEntitledSubscription.plan].storageLimit,
+            },
+          });
+        } else {
+          await tx.user.update({
+            where: { id: userId },
+            data: {
+              plan: Plan.FREE,
+              subscriptionStatus: SubscriptionStatus.CANCELLED,
+              currentPeriodEnd: null,
+              gracePeriodEnd: null,
+              storageLimit: SUBSCRIPTION_PLANS.FREE.storageLimit,
+            },
+          });
+        }
+      });
+    }
   } catch (error) {
     console.error("[Billing] Razorpay accepted cancellation but CloudBox could not persist it:", error);
     return res.status(503).json({
@@ -297,8 +366,10 @@ export const cancelSubscriptionController = async (
   }
 
   return res.status(200).json({
-    message: "Subscription cancellation scheduled successfully",
-    cancelAtPeriodEnd: true,
+    message: keepAccessUntilPeriodEnd
+      ? "Subscription cancellation scheduled successfully"
+      : "Subscription cancelled successfully",
+    cancelAtPeriodEnd: keepAccessUntilPeriodEnd,
     currentPeriodEnd: subscription.currentPeriodEnd,
   });
 };
