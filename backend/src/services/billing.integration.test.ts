@@ -42,7 +42,7 @@ const testEnvironment: Record<string, string> = {
 };
 
 for (const [key, value] of Object.entries(testEnvironment)) {
-  process.env[key] ||= value;
+  process.env[key] = value;
 }
 
 type TestRuntime = {
