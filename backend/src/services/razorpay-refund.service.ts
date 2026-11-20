@@ -68,16 +68,20 @@ export const processRefundProcessedEvent = async (payload: unknown) => {
       throw new Error("Refund references an unknown CloudBox payment");
     }
 
+    if (refund.currency !== payment.currency) {
+      throw new Error("Refund currency does not match the captured payment");
+    }
+
+    if (payment.status === PaymentStatus.REFUNDED) {
+      // Any further refund against an already fully refunded payment is invalid.
+      throw new Error("Payment has already been fully refunded");
+    }
+
     if (
-      refund.currency !== payment.currency ||
       ![PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED].includes(
         payment.status
       )
     ) {
-      // A refund cannot be applied to an unpaid, failed, or mismatched payment.
-      if (payment.status === PaymentStatus.REFUNDED) {
-        return { duplicate: true, paymentStatus: payment.status };
-      }
       throw new Error("Refund does not match a captured INR payment");
     }
 
