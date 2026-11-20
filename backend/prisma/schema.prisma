@@ -133,6 +133,7 @@ model Subscription {
   // Razorpay references
   razorpayPlanId         String
   razorpaySubscriptionId String @unique
+  checkoutUrl            String?
 
   status SubscriptionStatus @default(CREATED)
 
@@ -168,17 +169,19 @@ model Payment {
   subscriptionId String
   subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
 
-  // Razorpay payment reference
+  // Razorpay references
   razorpayPaymentId String? @unique
 
   // Amount stored in paise (₹149 = 14900)
-  amount   Int
-  currency String @default("INR")
-
-  status PaymentStatus
+  amount         Int
+  amountRefunded Int          @default(0)
+  currency       String       @default("INR")
+  status         PaymentStatus
 
   paidAt        DateTime?
   failureReason String?
+
+  refunds Refund[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -186,6 +189,21 @@ model Payment {
   @@index([userId, createdAt])
   @@index([subscriptionId])
   @@index([status])
+}
+
+model Refund {
+  id String @id @default(uuid())
+
+  paymentId       String
+  payment         Payment  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  razorpayRefundId String   @unique
+  amount           Int
+  currency         String   @default("INR")
+  processedAt      DateTime
+
+  createdAt DateTime @default(now())
+
+  @@index([paymentId, createdAt])
 }
 
 model RazorpayWebhookEvent {
