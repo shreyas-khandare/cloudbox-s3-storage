@@ -5,14 +5,23 @@ import test from "node:test";
 
 dotenv.config();
 
-const testDatabaseUrl = process.env.CLOUDBOX_TEST_DATABASE_URL?.trim();
-if (!testDatabaseUrl) {
+if (process.env.CLOUDBOX_ALLOW_DATABASE_TESTS !== "1") {
   throw new Error(
-    "CLOUDBOX_TEST_DATABASE_URL is required. Point it only at a disposable CloudBox test database."
+    "Set CLOUDBOX_ALLOW_DATABASE_TESTS=1 only after confirming DATABASE_URL points to a disposable test database."
   );
 }
 
-// Never let this suite fall back to the normal development/production DATABASE_URL.
+const testDatabaseUrl =
+  process.env.CLOUDBOX_TEST_DATABASE_URL?.trim() ||
+  process.env.DATABASE_URL?.trim();
+
+if (!testDatabaseUrl) {
+  throw new Error(
+    "Set DATABASE_URL or CLOUDBOX_TEST_DATABASE_URL to the disposable CloudBox test database."
+  );
+}
+
+// The explicit opt-in above prevents accidental execution against a normal DB.
 process.env.DATABASE_URL = testDatabaseUrl;
 
 const testEnvironment: Record<string, string> = {
