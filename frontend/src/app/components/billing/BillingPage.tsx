@@ -11,6 +11,7 @@ type Payment = {
   amount: number;
   currency: string;
   status: string;
+  amountRefunded?: number;
   paidAt?: string | null;
   failureReason?: string | null;
   createdAt: string;
@@ -23,6 +24,7 @@ type Subscription = {
   currentPeriodStart?: string | null;
   currentPeriodEnd?: string | null;
   cancelAtPeriodEnd?: boolean;
+  checkoutUrl?: string | null;
   createdAt?: string;
 };
 
@@ -90,14 +92,23 @@ export function BillingPage({ navigate }: Props) {
   };
 
   const cancelAtPeriodEnd = async () => {
-    if (!window.confirm("Schedule cancellation of your subscription at the end of the current billing period?")) return;
+    const periodEnd = subscription?.currentPeriodEnd
+      ? new Date(subscription.currentPeriodEnd)
+      : null;
+    const canKeepAccess = Boolean(periodEnd && periodEnd > new Date());
+    const confirmation = canKeepAccess
+      ? "Schedule cancellation at the end of the current billing period? Paid access will remain until then."
+      : "Cancel this subscription now? This will stop future billing and keep the account on the Free plan.";
+    if (!window.confirm(confirmation)) return;
     setError("");
     setNotice("");
     setCancelling(true);
     try {
       await api.post("/subscriptions/cancel");
       await Promise.all([loadBilling(), refreshUser()]);
-      setNotice("Cancellation has been scheduled. Your paid access remains until the current period ends.");
+      setNotice(canKeepAccess
+        ? "Cancellation has been scheduled. Your paid access remains until the current period ends."
+        : "The subscription has been cancelled. Your account is now on the Free plan.");
     } catch (cancelError) {
       setError(getApiErrorMessage(cancelError, "Unable to cancel the subscription."));
     } finally {
@@ -106,7 +117,11 @@ export function BillingPage({ navigate }: Props) {
   };
 
   const subscription = overview?.currentSubscription;
-  const canCancel = subscription?.status === "ACTIVE" && !subscription.cancelAtPeriodEnd;
+  const canCancel = Boolean(
+    subscription &&
+    ["ACTIVE", "PAST_DUE", "HALTED", "REFUNDED"].includes(subscription.status) &&
+    !subscription.cancelAtPeriodEnd
+  );
 
   return (
     <div className="min-h-screen cloudbox-font-body" style={{ background: "#F4F4FF" }}>
@@ -150,7 +165,22 @@ export function BillingPage({ navigate }: Props) {
                   <div className="rounded-2xl bg-[#F7F7FF] p-4"><p className="text-xs text-[#8585A0]">Grace period ends</p><p className="mt-1 font-semibold text-[#1A1A2E]">{formatDate(overview?.gracePeriodEnd)}</p></div>
                 </div>
                 {subscription?.cancelAtPeriodEnd && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Cancellation is scheduled. Your paid plan remains available until {formatDate(subscription.currentPeriodEnd)}.</p>}
-                {subscription?.status === "CREATED" && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Your subscription is awaiting payment authorization. Return to the Razorpay checkout tab to complete it.</p>}
+                {subscription?.status === "CREATED" && (
+                  <div className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <p>Your subscription is awaiting payment authorization. Resume hosted checkout to complete payment.</p>
+                    {subscription.checkoutUrl && (
+                      <button
+                        onClick={() => window.location.assign(subscription.checkoutUrl!)}
+                        className="mt-3 rounded-lg bg-amber-900 px-4 py-2 font-semibold text-white"
+                      >
+                        Resume Razorpay checkout
+                      </button>
+                    )}
+                  </div>
+                )}
+                {subscription?.status === "PAST_DUE" && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Payment is overdue. Your access remains available during the grace period ending {formatDate(overview?.gracePeriodEnd)}.</p>}
+                {subscription?.status === "HALTED" && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Razorpay has halted this subscription. Your grace period ends {formatDate(overview?.gracePeriodEnd)}. Resolve the payment issue or cancel the subscription.</p>}
+                {subscription?.status === "REFUNDED" && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">A full refund has been recorded and paid access has been revoked. Cancel the provider subscription here to stop future billing.</p>}
                 {subscription?.status === "ACTIVE" && overview?.plan !== subscription.plan && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Your {subscription.plan} subscription is active with Razorpay. CloudBox will enable the paid plan and its storage limit after Razorpay confirms the first successful plan charge.</p>}
                 {canCancel && <button onClick={() => void cancelAtPeriodEnd()} disabled={cancelling} className="mt-5 inline-flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"><XCircle className="h-4 w-4" /> {cancelling ? "Scheduling…" : "Cancel at period end"}</button>}
                 {subscription?.cancelAtPeriodEnd && <p className="mt-4 text-sm text-[#6B6B8A]">The subscription is already scheduled to cancel at the end of the billing period.</p>}
@@ -179,7 +209,11 @@ export function BillingPage({ navigate }: Props) {
                           <td className="px-6 py-4 font-medium text-[#1A1A2E]">{payment.subscription?.plan ?? "—"}</td>
                           <td className="px-6 py-4 font-semibold text-[#1A1A2E]">{formatMoney(payment.amount, payment.currency)}</td>
                           <td className="px-6 py-4 font-mono text-xs text-[#8585A0]">{payment.razorpayPaymentId ?? "Pending"}</td>
-                          <td className="px-6 py-4"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${payment.status === "CAPTURED" ? "bg-emerald-50 text-emerald-700" : payment.status === "FAILED" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{payment.status}</span>{payment.failureReason && <p className="mt-1 max-w-[180px] text-xs text-red-600">{payment.failureReason}</p>}</td>
+                          <td className="px-6 py-4">
+                            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${payment.status === "CAPTURED" ? "bg-emerald-50 text-emerald-700" : payment.status === "FAILED" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{payment.status}</span>
+                            {Boolean(payment.amountRefunded) && <p className="mt-1 text-xs text-[#8585A0]">Refunded {formatMoney(payment.amountRefunded!, payment.currency)}</p>}
+                            {payment.failureReason && <p className="mt-1 max-w-[180px] text-xs text-red-600">{payment.failureReason}</p>}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
