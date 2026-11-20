@@ -33,3 +33,11 @@ ON DELETE RESTRICT ON UPDATE CASCADE;
 CREATE UNIQUE INDEX "Subscription_one_open_per_user_key"
 ON "Subscription"("userId")
 WHERE "status" IN ('CREATED', 'ACTIVE', 'PAST_DUE', 'HALTED');
+
+ALTER TABLE "Payment"
+ADD CONSTRAINT "Payment_amountRefunded_check"
+CHECK ("amountRefunded" >= 0 AND "amountRefunded" <= "amount");
+
+ALTER TABLE "Refund"
+ADD CONSTRAINT "Refund_amount_positive_check"
+CHECK ("amount" > 0);
