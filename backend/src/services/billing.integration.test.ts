@@ -275,10 +275,6 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
         });
         assert.equal(openSubscriptions, 1);
       } finally {
-        const raceRows = await prisma.subscription.findMany({
-          where: { userId: raceUser.id },
-          select: { id: true },
-        });
         await prisma.subscription.deleteMany({ where: { userId: raceUser.id } });
         await prisma.user.delete({ where: { id: raceUser.id } });
       }
@@ -545,21 +541,34 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       });
     }
 
-    if (subscriptionId) {
-      const payment = await prisma.payment.findFirst({
-        where: { subscriptionId },
+    if (userId) {
+      const subscriptions = await prisma.subscription.findMany({
+        where: { userId },
         select: { id: true },
       });
-      if (payment) {
-        await prisma.refund.deleteMany({
-          where: { paymentId: payment.id },
+      const subscriptionIds = subscriptions.map((subscription) => subscription.id);
+
+      if (subscriptionIds.length) {
+        const payments = await prisma.payment.findMany({
+          where: { subscriptionId: { in: subscriptionIds } },
+          select: { id: true },
+        });
+        const paymentIds = payments.map((payment) => payment.id);
+
+        if (paymentIds.length) {
+          await prisma.refund.deleteMany({
+            where: { paymentId: { in: paymentIds } },
+          });
+        }
+
+        await prisma.payment.deleteMany({
+          where: { subscriptionId: { in: subscriptionIds } },
+        });
+        await prisma.subscription.deleteMany({
+          where: { id: { in: subscriptionIds } },
         });
       }
-      await prisma.payment.deleteMany({ where: { subscriptionId } });
-      await prisma.subscription.deleteMany({ where: { id: subscriptionId } });
-    }
 
-    if (userId) {
       await prisma.user.delete({ where: { id: userId } });
     }
 
