@@ -77,11 +77,11 @@ export const processRefundProcessedEvent = async (payload: unknown) => {
       throw new Error("Payment has already been fully refunded");
     }
 
-    if (
-      ![PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED].includes(
-        payment.status
-      )
-    ) {
+    const isRefundablePayment =
+      payment.status === PaymentStatus.CAPTURED ||
+      payment.status === PaymentStatus.PARTIALLY_REFUNDED;
+
+    if (!isRefundablePayment) {
       throw new Error("Refund does not match a captured INR payment");
     }
 
