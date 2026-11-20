@@ -296,7 +296,13 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       const [payment, updatedUser, refunds] = await Promise.all([
         prisma.payment.findUnique({ where: { razorpayPaymentId } }),
         prisma.user.findUnique({ where: { id: user.id } }),
-        prisma.refund.count({ where: { payment: { razorpayPaymentId } } }),
+        prisma.refund.count({
+          where: {
+            payment: {
+              is: { razorpayPaymentId },
+            },
+          },
+        }),
       ]);
 
       assert.equal(payment?.status, PaymentStatus.PARTIALLY_REFUNDED);
@@ -396,9 +402,15 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
     }
 
     if (subscriptionId) {
-      await prisma.refund.deleteMany({
-        where: { payment: { subscriptionId } },
+      const payment = await prisma.payment.findFirst({
+        where: { subscriptionId },
+        select: { id: true },
       });
+      if (payment) {
+        await prisma.refund.deleteMany({
+          where: { paymentId: payment.id },
+        });
+      }
       await prisma.payment.deleteMany({ where: { subscriptionId } });
       await prisma.subscription.deleteMany({ where: { id: subscriptionId } });
     }
