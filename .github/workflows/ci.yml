@@ -70,6 +70,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cloudbox?schema=public
           CLOUDBOX_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cloudbox?schema=public
+          CLOUDBOX_ALLOW_DATABASE_TESTS: "1"
         run: pnpm test:integration
 
       - name: Build backend
