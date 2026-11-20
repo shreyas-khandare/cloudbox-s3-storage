@@ -99,6 +99,25 @@ export const processRefundProcessedEvent = async (payload: unknown) => {
     });
 
     if (inserted.count === 0) {
+      const existingRefund = await tx.refund.findUnique({
+        where: { razorpayRefundId: refund.id },
+        select: {
+          paymentId: true,
+          amount: true,
+          currency: true,
+          processedAt: true,
+        },
+      });
+
+      if (
+        !existingRefund ||
+        existingRefund.paymentId !== payment.id ||
+        existingRefund.amount !== refund.amount ||
+        existingRefund.currency !== refund.currency
+      ) {
+        throw new Error("Razorpay refund ID was previously used with different refund details");
+      }
+
       const latestPayment = await tx.payment.findUnique({
         where: { id: payment.id },
         select: { status: true, amountRefunded: true },
