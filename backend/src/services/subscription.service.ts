@@ -76,6 +76,7 @@ export const createSubscription = async (
           SubscriptionStatus.ACTIVE,
           SubscriptionStatus.PAST_DUE,
           SubscriptionStatus.HALTED,
+          SubscriptionStatus.REFUNDED,
         ],
       },
     },
