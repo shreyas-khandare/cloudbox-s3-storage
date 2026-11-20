@@ -280,6 +280,76 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       }
     });
 
+    await t.test("moves a new subscription through pending, halted, and resumed without granting paid access", async () => {
+      const pendingEventId = await saveWebhook(
+        "subscription.pending",
+        {
+          subscription: {
+            entity: {
+              id: razorpaySubscriptionId,
+              status: "pending",
+            },
+          },
+        },
+        "pending"
+      );
+      await processRazorpayWebhookEvent(pendingEventId);
+
+      const pending = await prisma.subscription.findUnique({
+        where: { razorpaySubscriptionId },
+      });
+      const pendingUser = await prisma.user.findUnique({
+        where: { id: user.id },
+      });
+      assert.equal(pending?.status, SubscriptionStatus.PAST_DUE);
+      assert.ok(pending?.gracePeriodEnd && pending.gracePeriodEnd > new Date());
+      assert.equal(pendingUser?.plan, Plan.FREE);
+      assert.equal(pendingUser?.subscriptionStatus, SubscriptionStatus.PAST_DUE);
+
+      const haltedEventId = await saveWebhook(
+        "subscription.halted",
+        {
+          subscription: {
+            entity: {
+              id: razorpaySubscriptionId,
+              status: "halted",
+            },
+          },
+        },
+        "halted"
+      );
+      await processRazorpayWebhookEvent(haltedEventId);
+
+      const halted = await prisma.subscription.findUnique({
+        where: { razorpaySubscriptionId },
+      });
+      assert.equal(halted?.status, SubscriptionStatus.HALTED);
+      assert.ok(halted?.gracePeriodEnd && halted.gracePeriodEnd > new Date());
+
+      const resumedEventId = await saveWebhook(
+        "subscription.resumed",
+        {
+          subscription: {
+            entity: {
+              id: razorpaySubscriptionId,
+              status: "active",
+            },
+          },
+        },
+        "resumed"
+      );
+      await processRazorpayWebhookEvent(resumedEventId);
+
+      const resumed = await prisma.subscription.findUnique({
+        where: { razorpaySubscriptionId },
+      });
+      const resumedUser = await prisma.user.findUnique({
+        where: { id: user.id },
+      });
+      assert.equal(resumed?.status, SubscriptionStatus.HALTED);
+      assert.equal(resumedUser?.plan, Plan.FREE);
+    });
+
     await t.test("processes the first captured charge and grants the Pro entitlement", async () => {
       const eventId = await saveWebhook(
         "subscription.charged",
@@ -347,6 +417,43 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       });
       assert.equal(payment?.status, PaymentStatus.CAPTURED);
       assert.equal(subscription?.status, SubscriptionStatus.ACTIVE);
+    });
+
+    await t.test("a new failed renewal moves an active subscription into its grace period", async () => {
+      const eventId = await saveWebhook(
+        "payment.failed",
+        {
+          payment: {
+            entity: {
+              id: `pay_failed_${prefix}`,
+              subscription_id: razorpaySubscriptionId,
+              amount: 14900,
+              currency: "INR",
+              status: "failed",
+              error_description: "Insufficient funds",
+            },
+          },
+        },
+        "new-failed-payment"
+      );
+
+      await processRazorpayWebhookEvent(eventId);
+
+      const [subscription, updatedUser, failedPayment] = await Promise.all([
+        prisma.subscription.findUnique({
+          where: { razorpaySubscriptionId },
+        }),
+        prisma.user.findUnique({ where: { id: user.id } }),
+        prisma.payment.findUnique({
+          where: { razorpayPaymentId: `pay_failed_${prefix}` },
+        }),
+      ]);
+
+      assert.equal(subscription?.status, SubscriptionStatus.PAST_DUE);
+      assert.ok(subscription?.gracePeriodEnd && subscription.gracePeriodEnd > new Date());
+      assert.equal(updatedUser?.plan, Plan.PRO);
+      assert.equal(updatedUser?.subscriptionStatus, SubscriptionStatus.PAST_DUE);
+      assert.equal(failedPayment?.status, PaymentStatus.FAILED);
     });
 
     const refundProcessedAt = Math.floor(Date.now() / 1000);
