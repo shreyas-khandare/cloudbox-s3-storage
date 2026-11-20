@@ -591,7 +591,7 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
         },
       });
 
-      const processed = await expireSubscriptions();
+      const processed = await expireSubscriptions({ userId: user.id });
       assert.equal(processed, 1);
 
       const [subscription, updatedUser] = await Promise.all([
@@ -606,40 +606,54 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
     });
 
     await t.test("expires HALTED subscriptions when the grace period ends", async () => {
+      const haltedUser = await prisma.user.create({
+        data: {
+          name: "CloudBox HALTED Expiry Test",
+          email: `phase1-halted-${prefix}@example.test`,
+          emailVerified: true,
+        },
+        select: { id: true },
+      });
       const haltedSubscriptionId = `sub_phase1_halted_${prefix}`;
-      await prisma.subscription.create({
-        data: {
-          userId: user.id,
-          plan: Plan.BUSINESS,
-          razorpayPlanId: "plan_test_business",
-          razorpaySubscriptionId: haltedSubscriptionId,
-          status: SubscriptionStatus.HALTED,
-          gracePeriodEnd: new Date(Date.now() - 1000),
-        },
-      });
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          plan: Plan.BUSINESS,
-          subscriptionStatus: SubscriptionStatus.HALTED,
-          storageLimit: 1024n * 1024n * 1024n * 1024n,
-          gracePeriodEnd: new Date(Date.now() - 1000),
-        },
-      });
 
-      const { expireSubscriptions } = await import("./subscription-expiry.service");
-      const processed = await expireSubscriptions();
-      assert.equal(processed, 1);
+      try {
+        await prisma.subscription.create({
+          data: {
+            userId: haltedUser.id,
+            plan: Plan.BUSINESS,
+            razorpayPlanId: "plan_test_business",
+            razorpaySubscriptionId: haltedSubscriptionId,
+            status: SubscriptionStatus.HALTED,
+            gracePeriodEnd: new Date(Date.now() - 1000),
+          },
+        });
+        await prisma.user.update({
+          where: { id: haltedUser.id },
+          data: {
+            plan: Plan.BUSINESS,
+            subscriptionStatus: SubscriptionStatus.HALTED,
+            storageLimit: 1024n * 1024n * 1024n * 1024n,
+            gracePeriodEnd: new Date(Date.now() - 1000),
+          },
+        });
 
-      const [subscription, updatedUser] = await Promise.all([
-        prisma.subscription.findUnique({
-          where: { razorpaySubscriptionId: haltedSubscriptionId },
-        }),
-        prisma.user.findUnique({ where: { id: user.id } }),
-      ]);
+        const { expireSubscriptions } = await import("./subscription-expiry.service");
+        const processed = await expireSubscriptions({ userId: haltedUser.id });
+        assert.equal(processed, 1);
 
-      assert.equal(subscription?.status, SubscriptionStatus.EXPIRED);
-      assert.equal(updatedUser?.plan, Plan.FREE);
+        const [subscription, updatedUser] = await Promise.all([
+          prisma.subscription.findUnique({
+            where: { razorpaySubscriptionId: haltedSubscriptionId },
+          }),
+          prisma.user.findUnique({ where: { id: haltedUser.id } }),
+        ]);
+
+        assert.equal(subscription?.status, SubscriptionStatus.EXPIRED);
+        assert.equal(updatedUser?.plan, Plan.FREE);
+      } finally {
+        await prisma.subscription.deleteMany({ where: { userId: haltedUser.id } });
+        await prisma.user.delete({ where: { id: haltedUser.id } });
+      }
     });
   } finally {
     if (webhookEventIds.length) {
