@@ -1,6 +1,6 @@
 
 import { Request, Response } from "express";
-import { createHmac, timingSafeEqual } from "crypto";
+import { verifyRazorpayWebhookSignature } from "../utils/razorpay-webhook-signature";
 import { Prisma } from "@prisma/client";
 
 import { env } from "../config/env";
@@ -33,7 +33,7 @@ export const razorpayWebhookController = async (
       });
     }
 
-    // Validate signature format before comparing.
+    // Validate signature format before constant-time comparison.
     if (!/^[a-f0-9]{64}$/i.test(signature)) {
       return res.status(400).json({
         success: false,
@@ -41,15 +41,8 @@ export const razorpayWebhookController = async (
       });
     }
 
-    // Verify Razorpay webhook signature using the raw request body.
-    const expectedSignature = createHmac("sha256", webhookSecret)
-      .update(req.body)
-      .digest("hex");
-
-    const receivedBuffer = Buffer.from(signature, "hex");
-    const expectedBuffer = Buffer.from(expectedSignature, "hex");
-
-    if (!timingSafeEqual(receivedBuffer, expectedBuffer)) {
+    // Verify the signature against the exact raw request body.
+    if (!verifyRazorpayWebhookSignature(req.body, signature, webhookSecret)) {
       return res.status(400).json({
         success: false,
         message: "Invalid webhook signature",

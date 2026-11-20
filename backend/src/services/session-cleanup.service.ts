@@ -61,7 +61,7 @@ export const cleanupExpiredSessions = async (): Promise<void> => {
 };
 
 //run cleanup at startup and every 15 min 
-export const startSessionCleanup = (): void => {
+export const startSessionCleanup = (): NodeJS.Timeout => {
     void cleanupExpiredSessions();
 
     const timer = setInterval(() => {
@@ -72,4 +72,5 @@ export const startSessionCleanup = (): void => {
     timer.unref();
 
     console.info("[Session Cleanup] Scheduled to run every 15 minutes.");
+    return timer;
 }

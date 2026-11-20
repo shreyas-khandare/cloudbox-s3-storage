@@ -1,21 +1,75 @@
 import {
   useState,
   useRef,
-  useEffect
+  useEffect,
+  useCallback,
 } from "react";
 import { api } from "../../../services/api";
+import { getApiErrorMessage } from "../../../services/api-error";
 import { useAuth } from "../../../context/AuthContext";
 import {
   Cloud, FolderOpen, Clock, HardDrive, LogOut, Search,
-  Upload, Bell, Grid3X3, List, Download, Trash2,
-  FileText, Image, Film, Music, Archive, Plus,
-  ChevronDown, Check, Folder, Share2, Eye
+  Upload, Grid3X3, List, Download, Trash2,
+  FileText, Image, Film, Music, Archive, Plus, CreditCard, ReceiptText,
+  Check, Folder, Eye
 } from "lucide-react";
 import type { Page } from "../../App";
 
 interface Props {
   navigate: (page: Page) => void;
 }
+
+type SubscriptionPlan = {
+  id: "FREE" | "PRO" | "BUSINESS";
+  name: string;
+  maxFileSize: number;
+};
+
+type FileSort = "name" | "newest" | "oldest" | "largest" | "smallest";
+
+const MAX_SINGLE_UPLOAD_SIZE = 5_000_000_000;
+const MEGABYTE = 1024 * 1024;
+const GIGABYTE = 1024 * MEGABYTE;
+
+const uploadToS3 = (
+  uploadUrl: string,
+  formData: FormData,
+  onProgress: (progress: number) => void
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+
+    request.open("POST", uploadUrl);
+
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    });
+
+    request.addEventListener("load", () => {
+      if (request.status >= 200 && request.status < 300) {
+        resolve();
+        return;
+      }
+
+      reject(
+        new Error(
+          `S3 upload failed: ${request.status} ${request.statusText}`.trim()
+        )
+      );
+    });
+
+    request.addEventListener("error", () => {
+      reject(new Error("Network error while uploading the file to S3."));
+    });
+
+    request.addEventListener("abort", () => {
+      reject(new Error("The S3 upload was cancelled."));
+    });
+
+    request.send(formData);
+  });
 
 type CloudFile = {
   id: string;
@@ -44,9 +98,11 @@ const FILE_ICONS: Record<FileType | string, { icon: React.ElementType; color: st
 };
 
 export function UserDashboard({ navigate }: Props) {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const [files, setFiles] = useState<CloudFile[]>([]);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>([]);
   const [activeNav, setActiveNav] = useState("files");
+  const [sortBy, setSortBy] = useState<FileSort>("newest");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [search, setSearch] = useState("");
   const [isDragging, setIsDragging] = useState(false);
@@ -54,156 +110,116 @@ export function UserDashboard({ navigate }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-
-    fetchFiles();
-
+  const fetchFiles = useCallback(async (): Promise<void> => {
+    try {
+      const res = await api.get("/files");
+      setFiles(res.data.files);
+    } catch (error) {
+      console.error("Failed to fetch files:", error);
+    }
   }, []);
 
-
-  const fetchFiles = async () => {
-
+  const fetchSubscriptionPlans = useCallback(async (): Promise<void> => {
     try {
-
-      const res =
-        await api.get(
-          "/files"
-        );
-
-
-      setFiles(
-        res.data.files
-      );
-
-
+      const res = await api.get("/subscriptions/plans");
+      setSubscriptionPlans(res.data.data);
     } catch (error) {
-
-      console.log(
-        error
-      );
-
+      // The backend still validates every upload; this only affects early UI guidance.
+      console.error("Failed to fetch subscription plans:", error);
     }
+  }, []);
 
-  };
+  useEffect(() => {
+    void fetchFiles();
+    void fetchSubscriptionPlans();
+  }, [fetchFiles, fetchSubscriptionPlans]);
+
+  const getErrorMessage = (error: unknown, fallback: string): string =>
+    getApiErrorMessage(error, fallback);
 
   const filteredFiles = files
-    .filter((f) =>
-      f.name
-        .toLowerCase()
-        .includes(
-          search.toLowerCase()
-        )
+    .filter((file) =>
+      file.name.toLowerCase().includes(search.toLowerCase())
     )
     .sort((a, b) => {
-      if (activeNav !== "recent")
-        return 0;
-      return (
-        new Date(b.createdAt).getTime() -
-        new Date(a.createdAt).getTime()
-      );
+      switch (sortBy) {
+        case "name":
+          return a.name.localeCompare(b.name, undefined, {
+            numeric: true,
+            sensitivity: "base",
+          });
+        case "oldest":
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case "largest":
+          return Number(b.size) - Number(a.size);
+        case "smallest":
+          return Number(a.size) - Number(b.size);
+        case "newest":
+        default:
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
     });
 
-  const uploadFile = async (
-    file: File
-  ) => {
+  const uploadFile = async (file: File) => {
+    const contentType = file.type || "application/octet-stream";
+    const planLimit = subscriptionPlans.find((plan) => plan.id === user?.plan)?.maxFileSize;
+    const effectiveFileLimit = Math.min(planLimit ?? MAX_SINGLE_UPLOAD_SIZE, MAX_SINGLE_UPLOAD_SIZE);
 
-    if (file.size > 50 * 1024 * 1024) {
-      alert("File size must not exceed 50 MB");
+    if (file.size > effectiveFileLimit) {
+      const limitLabel = formatUploadLimit(effectiveFileLimit);
+      const limitMessage = effectiveFileLimit >= MAX_SINGLE_UPLOAD_SIZE
+        ? `Your current upload limit is ${limitLabel}. Files larger than 5 GB require multipart upload, which is not available yet.`
+        : `Your ${user?.plan ?? "current"} plan supports files up to ${limitLabel} per file.`;
+      alert(limitMessage);
       return;
     }
 
     try {
+      setUploadProgress({ name: file.name, progress: 2 });
 
-      setUploadProgress({
-        name: file.name,
-        progress: 20
+      const urlRes = await api.post("/files/upload-url", {
+        fileName: file.name,
+        fileType: contentType,
+        fileSize: file.size,
       });
 
-
-      const urlRes =
-        await api.post(
-          "/files/upload-url",
-          {
-            fileName: file.name,
-            fileType: file.type,
-            fileSize: file.size
-          }
-        );
-
-
-      setUploadProgress({
-        name: file.name,
-        progress: 50
-      });
-
-
+      setUploadProgress({ name: file.name, progress: 5 });
 
       const formData = new FormData();
-
-      Object.entries(urlRes.data.fields).forEach(
-        ([key, value]) => {
-          formData.append(key, value as string);
-        }
-      );
-
+      Object.entries(urlRes.data.fields).forEach(([key, value]) => {
+        formData.append(key, value as string);
+      });
       formData.append("file", file);
 
-      const uploadRes = await fetch(
+      await uploadToS3(
         urlRes.data.uploadUrl,
-        {
-          method: "POST",
-          body: formData
+        formData,
+        (uploadPercent) => {
+          // Reserve the final 10% for saving metadata and refreshing account data.
+          const progress = 5 + Math.round(uploadPercent * 0.85);
+          setUploadProgress({ name: file.name, progress });
         }
       );
 
-      if (!uploadRes.ok) {
-        throw new Error(
-          `S3 upload failed: ${uploadRes.status} ${uploadRes.statusText}`
-        );
-      }
+      setUploadProgress({ name: file.name, progress: 92 });
 
-      setUploadProgress({
+      await api.post("/files/save", {
         name: file.name,
-        progress: 80
+        type: contentType,
+        size: file.size,
+        s3Key: urlRes.data.key,
       });
 
+      setUploadProgress({ name: file.name, progress: 97 });
+      await Promise.all([fetchFiles(), refreshUser()]);
 
-      await api.post(
-        "/files/save",
-        {
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          s3Key: urlRes.data.key
-        }
-      );
-
-
-      await fetchFiles();
-
-
-      setUploadProgress({
-        name: file.name,
-        progress: 100
-      });
-
-
-      setTimeout(
-        () => setUploadProgress(null),
-        800
-      );
-
-
+      setUploadProgress({ name: file.name, progress: 100 });
+      setTimeout(() => setUploadProgress(null), 1000);
     } catch (error) {
-
-      console.log(error);
+      console.error("Upload failed:", error);
       setUploadProgress(null);
-      alert(
-        "Upload failed"
-      );
-
+      alert(getErrorMessage(error, "Upload failed. Please try again."));
     }
-
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -239,21 +255,14 @@ export function UserDashboard({ navigate }: Props) {
       );
 
 
-      setFiles(
-        prev =>
-          prev.filter(
-            f => f.id !== id
-          )
-      );
+      setFiles((prev) => prev.filter((file) => file.id !== id));
+      await refreshUser();
 
 
     } catch (error) {
 
-      console.log(error);
-
-      alert(
-        "Delete failed"
-      );
+      console.error("Delete failed:", error);
+      alert(getErrorMessage(error, "Delete failed. Please try again."));
 
     }
 
@@ -305,7 +314,7 @@ export function UserDashboard({ navigate }: Props) {
     } catch (error) {
       console.error("Preview failed:", error);
       previewWindow.close();
-      alert("Preview failed");
+      alert(getErrorMessage(error, "Preview failed. Please try again."));
     }
   };
 
@@ -337,23 +346,26 @@ export function UserDashboard({ navigate }: Props) {
 
   };
 
-  const formatSize = (bytes: string) => {
-    return (
-      Number(bytes)
-      /
-      1024
-      /
-      1024
-    ).toFixed(2)
-      + " MB";
+  const formatSize = (bytes: string | number): string => {
+    const size = Number(bytes);
+    if (!Number.isFinite(size) || size < 0) return "0 MB";
+    if (size >= GIGABYTE) return `${(size / GIGABYTE).toFixed(2)} GB`;
+    if (size >= MEGABYTE) return `${(size / MEGABYTE).toFixed(2)} MB`;
+    if (size >= 1024) return `${(size / 1024).toFixed(2)} KB`;
+    return `${size} bytes`;
   };
 
+  const formatUploadLimit = (bytes: number): string => {
+    if (bytes === 100 * MEGABYTE) return "100 MB";
+    if (bytes === 3 * GIGABYTE) return "3 GB";
+    if (bytes === MAX_SINGLE_UPLOAD_SIZE) return "5 GB";
+    return formatSize(bytes);
+  };
 
-  const usedBytes = Number(user?.storageUsed || 0) / (1024 * 1024);
-
-  const totalBytes = Number(user?.storageLimit || 1073741824) / (1024 * 1024);
-
-  const usedPct = Math.min((usedBytes / totalBytes) * 100, 100);
+  const usedBytes = Number(user?.storageUsed || 0);
+  const totalBytes = Number(user?.storageLimit || GIGABYTE);
+  const usedPct = totalBytes > 0 ? Math.min((usedBytes / totalBytes) * 100, 100) : 0;
+  const planMaxFileSize = subscriptionPlans.find((plan) => plan.id === user?.plan)?.maxFileSize;
 
   return (
     <div className="flex h-screen overflow-hidden cloudbox-font-body" style={{ background: "#F4F4FF" }}>
@@ -392,20 +404,36 @@ export function UserDashboard({ navigate }: Props) {
               </span>
             </button>
           ))}
+
+          <div className="mt-5 mb-2 px-3">
+            <p style={{ fontSize: "0.6875rem", fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Account
+            </p>
+          </div>
+          <button onClick={() => { navigate("plans"); setSidebarOpen(false); }}
+            className="sidebar-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-left">
+            <CreditCard className="w-4 h-4 flex-shrink-0" style={{ color: "rgba(255,255,255,0.5)" }} />
+            <span style={{ fontSize: "0.875rem", fontWeight: 500, color: "rgba(255,255,255,0.7)" }}>Plans</span>
+          </button>
+          <button onClick={() => { navigate("billing"); setSidebarOpen(false); }}
+            className="sidebar-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-left">
+            <ReceiptText className="w-4 h-4 flex-shrink-0" style={{ color: "rgba(255,255,255,0.5)" }} />
+            <span style={{ fontSize: "0.875rem", fontWeight: 500, color: "rgba(255,255,255,0.7)" }}>Billing</span>
+          </button>
         </nav>
 
         {/* Storage usage */}
         <div className="mx-3 mb-3 p-4 rounded-xl" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
           <div className="flex justify-between items-center mb-2">
             <p style={{ fontSize: "0.75rem", fontWeight: 600, color: "#fff" }}>Storage</p>
-            <p style={{ fontSize: "0.6875rem", color: "rgba(255,255,255,0.4)" }}>{usedBytes.toFixed(2)} MB / {(totalBytes / 1024).toFixed(2)} GB</p>
+            <p style={{ fontSize: "0.6875rem", color: "rgba(255,255,255,0.4)" }}>{formatSize(usedBytes)} / {formatSize(totalBytes)}</p>
           </div>
           <div className="h-1.5 rounded-full mb-3" style={{ background: "rgba(255,255,255,0.1)" }}>
             <div className="h-full rounded-full accent-gradient transition-all" style={{ width: `${usedPct}%` }} />
           </div>
-          <button onClick={() => navigate("register")}
+          <button onClick={() => navigate("plans")}
             className="w-full py-2 rounded-lg text-white text-xs font-semibold transition-opacity hover:opacity-80 accent-gradient">
-            Upgrade to Pro
+            View plans
           </button>
         </div>
 
@@ -480,11 +508,6 @@ export function UserDashboard({ navigate }: Props) {
               </button>
             )}
 
-            <button className="relative p-2 rounded-xl hover:bg-[#EEF0FF] transition-colors">
-              <Bell className="w-5 h-5 text-[#6B6B8A]" />
-              <div className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#3D38F5]" />
-            </button>
-
             <button
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold accent-gradient hover:opacity-90 shadow-md shadow-[#3D38F5]/20 transition-all">
@@ -492,7 +515,7 @@ export function UserDashboard({ navigate }: Props) {
               <span className="hidden sm:inline">Upload</span>
             </button>
 
-            <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold cursor-pointer accent-gradient">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold accent-gradient">
               {user?.name?.charAt(0)}
             </div>
           </div>
@@ -508,7 +531,13 @@ export function UserDashboard({ navigate }: Props) {
                 <div className="flex items-center gap-2">
                   <Upload className="w-4 h-4 text-[#3D38F5]" />
                   <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#1A1A2E" }}>
-                    {uploadProgress.progress < 100 ? "Uploading…" : "Upload complete!"}
+                    {uploadProgress.progress === 100
+                      ? "Upload complete!"
+                      : uploadProgress.progress >= 92
+                        ? "Saving file…"
+                        : uploadProgress.progress <= 5
+                          ? "Preparing upload…"
+                          : "Uploading to S3…"}
                   </span>
                 </div>
                 {uploadProgress.progress < 100
@@ -526,11 +555,11 @@ export function UserDashboard({ navigate }: Props) {
           )}
 
           {/* Stats row */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
             {[
               { label: "Total Files", value: String(files.length), icon: FolderOpen, color: "#3D38F5", bg: "#EEF0FF" },
-              { label: "Storage Used", value: `${usedBytes.toFixed(2)} MB`, icon: HardDrive, color: "#8B5CF6", bg: "#F5F3FF" },
-              { label: "Shared", value: "0", icon: Share2, color: "#10B981", bg: "#ECFDF5" },
+              { label: "Storage Used", value: formatSize(usedBytes), icon: HardDrive, color: "#8B5CF6", bg: "#F5F3FF" },
+              { label: "Current Plan", value: user?.plan ?? "FREE", icon: Cloud, color: "#10B981", bg: "#ECFDF5" },
             ].map((stat) => (
               <div key={stat.label} className="p-4 rounded-2xl border border-[#E8E8F0] hover:border-[#3D38F5]/20 transition-all"
                 style={{ background: "#fff" }}>
@@ -558,25 +587,21 @@ export function UserDashboard({ navigate }: Props) {
                   Storage Usage
                 </p>
                 <p className="cloudbox-font-display" style={{ fontSize: "1.5rem", fontWeight: 800, color: "#fff", marginBottom: "2px" }}>
-                  {usedBytes.toFixed(2)} MB <span style={{ fontSize: "1rem", fontWeight: 500 }}>used of {(totalBytes / 1024).toFixed(2)} GB</span>
+                  {formatSize(usedBytes)} <span style={{ fontSize: "1rem", fontWeight: 500 }}>used of {formatSize(totalBytes)}</span>
                 </p>
                 <p style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.5)" }}>
-                  {((usedBytes / totalBytes) * 100).toFixed(0)}% of free tier used
+                  {usedPct.toFixed(0)}% of your storage used
                 </p>
               </div>
               <div className="sm:w-48 flex-shrink-0">
                 <div className="flex justify-between mb-1.5">
                   <span style={{ fontSize: "0.6875rem", color: "rgba(255,255,255,0.6)" }}>0 MB</span>
-                  <span style={{ fontSize: "0.6875rem", color: "rgba(255,255,255,0.6)" }}>{(totalBytes / 1024).toFixed(0)} GB</span>
+                  <span style={{ fontSize: "0.6875rem", color: "rgba(255,255,255,0.6)" }}>{formatSize(totalBytes)}</span>
                 </div>
                 <div className="h-2 rounded-full" style={{ background: "rgba(255,255,255,0.2)" }}>
                   <div className="h-full rounded-full bg-white transition-all" style={{ width: `${usedPct}%` }} />
                 </div>
-                {/* <button onClick={() => navigate("register")}
-                  className="mt-3 w-full py-2 rounded-xl text-xs font-semibold text-[#3D38F5] hover:opacity-90 transition-opacity"
-                  style={{ background: "#fff" }}>
-                  Upgrade to Pro — 100 GB
-                </button> */}
+
               </div>
             </div>
           </div>
@@ -602,6 +627,11 @@ export function UserDashboard({ navigate }: Props) {
             <p style={{ fontSize: "0.8125rem", color: "#6B6B8A", marginBottom: "12px" }}>
               or click to browse your computer
             </p>
+            {planMaxFileSize !== undefined && (
+              <p style={{ fontSize: "0.75rem", color: "#9090A8", marginBottom: "12px" }}>
+                Maximum file size on your {user?.plan ?? "current"} plan: {formatUploadLimit(planMaxFileSize)}
+              </p>
+            )}
             <button
               onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
               className="px-5 py-2 rounded-xl text-sm font-semibold transition-all hover:opacity-90 accent-gradient text-white">
@@ -630,10 +660,21 @@ export function UserDashboard({ navigate }: Props) {
                 style={{ background: viewMode === "list" ? "#EEF0FF" : "transparent", color: viewMode === "list" ? "#3D38F5" : "#9090A8" }}>
                 <List className="w-4 h-4" />
               </button>
-              <button className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[#E8E8F0] hover:border-[#3D38F5]/30 transition-all text-sm"
-                style={{ color: "#6B6B8A", background: "#fff" }}>
-                Name <ChevronDown className="w-3.5 h-3.5" />
-              </button>
+              <label className="flex items-center gap-2 text-sm text-[#6B6B8A]">
+                <span className="hidden sm:inline">Sort by</span>
+                <select
+                  value={sortBy}
+                  onChange={(event) => setSortBy(event.target.value as FileSort)}
+                  aria-label="Sort files"
+                  className="px-3 py-2 rounded-xl border border-[#E8E8F0] bg-white outline-none hover:border-[#3D38F5]/30 focus:border-[#3D38F5] transition-all"
+                >
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="name">Name (A–Z)</option>
+                  <option value="largest">Largest</option>
+                  <option value="smallest">Smallest</option>
+                </select>
+              </label>
             </div>
           </div>
 

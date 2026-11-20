@@ -1,4 +1,5 @@
 import type { Plan } from "@prisma/client";
+import { MAX_SINGLE_UPLOAD_SIZE } from "./upload";
 
 export const SUBSCRIPTION_GRACE_PERIOD_DAYS = 3;
 
@@ -17,7 +18,7 @@ export const SUBSCRIPTION_PLANS = {
     price: 14900,
     currency: "INR",
     storageLimit: 100n * 1024n * 1024n * 1024n,
-    maxFileSize: 2 * 1024 * 1024 * 1024,
+    maxFileSize: 3 * 1024 * 1024 * 1024,
     deviceLimit: 3,
   },
 
@@ -26,7 +27,7 @@ export const SUBSCRIPTION_PLANS = {
     price: 39900,
     currency: "INR",
     storageLimit: 1024n * 1024n * 1024n * 1024n,
-    maxFileSize: 10 * 1024 * 1024 * 1024,
+    maxFileSize: MAX_SINGLE_UPLOAD_SIZE,
     deviceLimit: 3,
   },
 } as const;

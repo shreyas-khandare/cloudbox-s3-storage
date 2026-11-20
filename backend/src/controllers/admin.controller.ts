@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 
 import prisma from "../config/prisma";
+import { isServiceUnavailable } from "../utils/dependency-error";
 
 
 // Admin Stats
@@ -44,15 +45,12 @@ export const getStats = async (
 
 
     } catch (error) {
-
-
-        res.status(500).json({
-
-            message:
-                "Failed to fetch stats"
-
+        console.error("[Admin] Fetch stats failed:", error);
+        res.status(isServiceUnavailable(error) ? 503 : 500).json({
+            message: isServiceUnavailable(error)
+                ? "Database service is temporarily unavailable."
+                : "Failed to fetch stats",
         });
-
     }
 
 };
@@ -117,14 +115,12 @@ export const getAdminUsers = async (
 
 
     } catch (error) {
-
-        res.status(500).json({
-
-            message:
-                "Failed to fetch users"
-
+        console.error("[Admin] Fetch users failed:", error);
+        res.status(isServiceUnavailable(error) ? 503 : 500).json({
+            message: isServiceUnavailable(error)
+                ? "Database service is temporarily unavailable."
+                : "Failed to fetch users",
         });
-
     }
 
 };
@@ -179,15 +175,12 @@ export const getAdminFiles = async (
 
 
     } catch (error) {
-
-
-        res.status(500).json({
-
-            message:
-                "Failed to fetch files"
-
+        console.error("[Admin] Fetch files failed:", error);
+        res.status(isServiceUnavailable(error) ? 503 : 500).json({
+            message: isServiceUnavailable(error)
+                ? "Database service is temporarily unavailable."
+                : "Failed to fetch files",
         });
-
     }
 
 };

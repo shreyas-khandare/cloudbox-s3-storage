@@ -7,11 +7,19 @@ import {
 import prisma from "../config/prisma";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
 
-export const expireSubscriptions = async () => {
+type ExpireSubscriptionOptions = {
+  userId?: string;
+};
+
+export const expireSubscriptions = async (
+  options: ExpireSubscriptionOptions = {}
+) => {
+  const { userId } = options;
   const now = new Date();
 
   const expiredSubscriptions = await prisma.subscription.findMany({
     where: {
+      ...(userId ? { userId } : {}),
       OR: [
         {
           status: {
@@ -25,7 +33,9 @@ export const expireSubscriptions = async () => {
           },
         },
         {
-          status: SubscriptionStatus.ACTIVE,
+          status: {
+            in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.REFUNDED],
+          },
           cancelAtPeriodEnd: true,
           currentPeriodEnd: {
             lte: now,
@@ -58,7 +68,10 @@ export const expireSubscriptions = async () => {
         currentSubscription.gracePeriodEnd <= now;
 
       const isScheduledCancellationExpired =
-        currentSubscription.status === SubscriptionStatus.ACTIVE &&
+        (
+          currentSubscription.status === SubscriptionStatus.ACTIVE ||
+          currentSubscription.status === SubscriptionStatus.REFUNDED
+        ) &&
         currentSubscription.cancelAtPeriodEnd &&
         currentSubscription.currentPeriodEnd !== null &&
         currentSubscription.currentPeriodEnd <= now;
@@ -118,7 +131,7 @@ export const expireSubscriptions = async () => {
 
 let expiryJobRunning = false;
 
-export const startSubscriptionExpiryScheduler = () => {
+export const startSubscriptionExpiryScheduler = (): NodeJS.Timeout => {
   const runExpiryJob = async () => {
     if (expiryJobRunning) return;
 
@@ -143,8 +156,10 @@ export const startSubscriptionExpiryScheduler = () => {
   // Run immediately when the server starts.
   void runExpiryJob();
 
-  // Repeat every hour.
-  setInterval(() => {
+  // Repeat every hour without keeping the process alive during shutdown.
+  const timer = setInterval(() => {
     void runExpiryJob();
   }, 60 * 60 * 1000);
+  timer.unref();
+  return timer;
 };

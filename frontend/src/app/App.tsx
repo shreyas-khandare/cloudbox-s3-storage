@@ -3,6 +3,7 @@ import {
   Routes,
   Route,
   useNavigate,
+  useLocation,
   Navigate,
 } from "react-router-dom";
 
@@ -11,6 +12,8 @@ import { LoginPage } from "./components/auth/LoginPage";
 import { RegisterPage } from "./components/auth/RegisterPage";
 import { UserDashboard } from "./components/dashboard/UserDashboard";
 import { AdminDashboard } from "./components/admin/AdminDashboard";
+import { PlansPage } from "./components/billing/PlansPage";
+import { BillingPage } from "./components/billing/BillingPage";
 import { useAuth } from "../context/AuthContext";
 
 export type Page =
@@ -18,7 +21,9 @@ export type Page =
   | "login"
   | "register"
   | "dashboard"
-  | "admin";
+  | "admin"
+  | "plans"
+  | "billing";
 
 function ProtectedRoute({
   children,
@@ -26,13 +31,20 @@ function ProtectedRoute({
   children: React.ReactNode;
 }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return <div>Loading...</div>;
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: `${location.pathname}${location.search}` }}
+      />
+    );
   }
 
   return children;
@@ -49,6 +61,8 @@ function AppRoutes() {
       register: "/register",
       dashboard: "/dashboard",
       admin: "/admin",
+      plans: "/plans",
+      billing: "/billing",
     };
 
     routerNavigate(paths[page]);
@@ -84,6 +98,21 @@ function AppRoutes() {
         }
       />
 
+
+      <Route
+        path="/plans"
+        element={<PlansPage navigate={navigate} />}
+      />
+
+      <Route
+        path="/billing"
+        element={
+          <ProtectedRoute>
+            <BillingPage navigate={navigate} />
+          </ProtectedRoute>
+        }
+      />
+
       <Route
         path="/admin"
         element={
@@ -96,6 +125,8 @@ function AppRoutes() {
           )
         }
       />
+
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

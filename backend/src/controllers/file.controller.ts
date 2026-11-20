@@ -3,6 +3,10 @@ import prisma from "../config/prisma";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
+import {
+    MAX_SINGLE_UPLOAD_SIZE,
+    formatUploadLimitLabel,
+} from "../config/upload";
 
 import {
     PutObjectCommand,
@@ -16,7 +20,35 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 
 import { s3 } from "../config/s3";
+import { sendDependencyError } from "../utils/dependency-error";
 
+const discardStagedUpload = async (key: string, reason: string): Promise<void> => {
+    try {
+        // Never remove an object that already has committed file metadata.
+        const existingFile = await prisma.file.findUnique({
+            where: { s3Key: key },
+            select: { id: true },
+        });
+
+        if (existingFile) {
+            return;
+        }
+
+        await s3.send(
+            new DeleteObjectCommand({
+                Bucket: env.AWS.BUCKET,
+                Key: key,
+            })
+        );
+    } catch (error) {
+        // Do not hide the original validation/quota error if cleanup also fails.
+        console.error("[File API] Failed to remove rejected staged upload:", {
+            reason,
+            key,
+            error: error instanceof Error ? error.message : "Unknown error",
+        });
+    }
+};
 
 // Generate S3 upload URL
 export const generateUploadUrl = async (
@@ -57,9 +89,13 @@ export const generateUploadUrl = async (
         // Enforce plan-specific maximum file size
         if (fileSize > planConfig.maxFileSize) {
             return res.status(413).json({
-                message: `Your ${planConfig.name} plan allows a maximum file size of ${
-                    planConfig.maxFileSize / (1024 * 1024)
-                } MB`,
+                message: `Your ${planConfig.name} plan allows a maximum file size of ${formatUploadLimitLabel(planConfig.maxFileSize)}.`,
+            });
+        }
+
+        if (fileSize > MAX_SINGLE_UPLOAD_SIZE) {
+            return res.status(413).json({
+                message: "Files larger than 5 GB require multipart upload, which is not available yet.",
             });
         }
 
@@ -102,11 +138,7 @@ export const generateUploadUrl = async (
             key,
         });
     } catch (error) {
-        console.error("Generate Upload URL Error:", error);
-
-        return res.status(500).json({
-            message: "Failed to generate upload URL",
-        });
+        return sendDependencyError(res, error, "Generate upload URL");
     }
 };
 
@@ -142,6 +174,7 @@ export const saveFile = async (
         });
 
         if (!user) {
+            await discardStagedUpload(s3Key, "User no longer exists");
             return res.status(404).json({
                 message: "User not found",
             });
@@ -151,8 +184,16 @@ export const saveFile = async (
         const fileSize = BigInt(size);
 
         if (size > planConfig.maxFileSize) {
+            await discardStagedUpload(s3Key, "File exceeds the account plan limit");
             return res.status(413).json({
                 message: "File exceeds your plan's maximum file size",
+            });
+        }
+
+        if (size > MAX_SINGLE_UPLOAD_SIZE) {
+            await discardStagedUpload(s3Key, "File exceeds the single-request S3 limit");
+            return res.status(413).json({
+                message: "Files larger than 5 GB require multipart upload, which is not available yet.",
             });
         }
 
@@ -167,12 +208,14 @@ export const saveFile = async (
             headResult.ContentLength === undefined ||
             headResult.ContentLength !== size
         ) {
+            await discardStagedUpload(s3Key, "Uploaded file size mismatch");
             return res.status(400).json({
                 message: "Uploaded file size does not match",
             });
         }
 
         if (headResult.ContentType !== type) {
+            await discardStagedUpload(s3Key, "Uploaded file content type mismatch");
             return res.status(400).json({
                 message: "Uploaded file type does not match",
             });
@@ -212,20 +255,15 @@ export const saveFile = async (
         });
 
     } catch (error) {
-        console.error("Save File Error:", error);
-
-        if (
-            error instanceof Error &&
-            error.message === "STORAGE_LIMIT_EXCEEDED"
-        ) {
+        if (error instanceof Error && error.message === "STORAGE_LIMIT_EXCEEDED") {
+            await discardStagedUpload(s3Key, "Storage quota check rejected the upload");
             return res.status(409).json({
+                success: false,
                 message: "Storage limit exceeded",
             });
         }
 
-        return res.status(500).json({
-            message: "Failed to save file",
-        });
+        return sendDependencyError(res, error, "Save file metadata");
     }
 };
 
@@ -287,18 +325,7 @@ export const getMyFiles = async (
     } catch (error) {
 
 
-        console.log(
-            "Get Files Error:",
-            error
-        );
-
-
-        res.status(500).json({
-
-            message:
-                "Failed to get files"
-
-        });
+        return sendDependencyError(res, error, "List files");
 
 
     }
@@ -388,18 +415,7 @@ export const downloadFile = async (
     } catch (error) {
 
 
-        console.log(
-            "Download Error:",
-            error
-        );
-
-
-        res.status(500).json({
-
-            message:
-                "Failed to generate download URL"
-
-        });
+        return sendDependencyError(res, error, "Generate download URL");
 
 
     }
@@ -476,11 +492,7 @@ export const deleteFile = async (
         });
 
     } catch (error) {
-        console.error("Delete Error:", error);
-
-        return res.status(500).json({
-            message: "Failed to delete file",
-        });
+        return sendDependencyError(res, error, "Delete file");
     }
 };
 
@@ -549,12 +561,7 @@ export const previewFile = async (
 
     } catch (error) {
 
-        console.log(error);
-
-
-        res.status(500).json({
-            message: "Preview failed"
-        });
+        return sendDependencyError(res, error, "Generate preview URL");
 
     }
 

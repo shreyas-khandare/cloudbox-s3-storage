@@ -23,9 +23,10 @@ export const createRazorpaySubscription = async (
 };
 
 export const cancelRazorpaySubscription = async (
-  subscriptionId: string
+  subscriptionId: string,
+  cancelAtCycleEnd = true
 ) => {
-  return razorpay.subscriptions.cancel(subscriptionId, true);
+  return razorpay.subscriptions.cancel(subscriptionId, cancelAtCycleEnd);
 };
 
 export default razorpay;

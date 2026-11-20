@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Cloud, Eye, EyeOff, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
 import type { Page } from "../../App";
 import { api } from "../../../services/api";
+import { getApiErrorMessage } from "../../../services/api-error";
 import { useAuth } from "../../../context/AuthContext";
 import { GoogleLogin } from "@react-oauth/google";
 
@@ -11,6 +13,22 @@ interface Props {
 
 export function RegisterPage({ navigate }: Props) {
   const { setUser, googleLogin } = useAuth();
+  const routerNavigate = useNavigate();
+  const location = useLocation();
+  const requestedPath = (location.state as { from?: unknown } | null)?.from;
+  const redirectTo = typeof requestedPath === "string" && requestedPath.startsWith("/") && !requestedPath.startsWith("//")
+    ? requestedPath
+    : null;
+
+  const navigateAfterGoogleLogin = (role: "USER" | "ADMIN") => {
+    if (role === "ADMIN") {
+      navigate("admin");
+    } else if (redirectTo) {
+      routerNavigate(redirectTo, { replace: true });
+    } else {
+      navigate("dashboard");
+    }
+  };
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -63,14 +81,9 @@ export function RegisterPage({ navigate }: Props) {
       });
 
       setUser(null);
-      navigate("login");
+      routerNavigate("/login", { state: redirectTo ? { from: redirectTo } : undefined });
     } catch (error: unknown) {
-      const message =
-        (error as {
-          response?: { data?: { message?: string } };
-        }).response?.data?.message ?? "Registration failed";
-
-      setError(message);
+      setError(getApiErrorMessage(error, "Registration failed"));
     } finally {
       setLoading(false);
     }
@@ -97,12 +110,7 @@ export function RegisterPage({ navigate }: Props) {
       setOtp("");
       setEmailVerified(false);
     } catch (error: unknown) {
-      const message =
-        (error as {
-          response?: { data?: { message?: string } };
-        }).response?.data?.message ?? "Unable to send OTP.";
-
-      setError(message);
+      setError(getApiErrorMessage(error, "Unable to send OTP."));
     } finally {
       setOtpLoading(false);
     }
@@ -128,12 +136,7 @@ export function RegisterPage({ navigate }: Props) {
     } catch (error: unknown) {
       setEmailVerified(false);
 
-      const message =
-        (error as {
-          response?: { data?: { message?: string } };
-        }).response?.data?.message ?? "Invalid or expired OTP.";
-
-      setError(message);
+      setError(getApiErrorMessage(error, "Invalid or expired OTP."));
     } finally {
       setVerifyLoading(false);
     }
@@ -176,8 +179,8 @@ export function RegisterPage({ navigate }: Props) {
           <div className="space-y-5">
             {[
               { title: "1 GB Free Storage", desc: "Start immediately, no credit card needed" },
-              { title: "AES-256 Encryption", desc: "Files encrypted at rest with Amazon S3" },
-              { title: "Access Anywhere", desc: "Web, desktop, and mobile apps available" },
+              { title: "Private file access", desc: "Preview and download files through temporary access links" },
+              { title: "Access Anywhere", desc: "Open your CloudBox files from a browser on your devices" },
               { title: "Simple File Management", desc: "Upload, organize and access your files anytime" },
             ].map((item) => (
               <div key={item.title} className="flex items-start gap-3">
@@ -223,13 +226,9 @@ export function RegisterPage({ navigate }: Props) {
                   credentialResponse.credential
                 );
 
-                if (user.role === "ADMIN") {
-                  navigate("admin");
-                } else {
-                  navigate("dashboard");
-                }
-              } catch {
-                setError("Google registration failed");
+                navigateAfterGoogleLogin(user.role);
+              } catch (error) {
+                setError(getApiErrorMessage(error, "Google registration failed"));
               }
             }}
             onError={() => {
@@ -413,7 +412,7 @@ export function RegisterPage({ navigate }: Props) {
 
           <p className="text-center mt-6" style={{ fontSize: "0.875rem", color: "#6B6B8A" }}>
             Already have an account?{" "}
-            <button onClick={() => navigate("login")}
+            <button onClick={() => routerNavigate("/login", { state: redirectTo ? { from: redirectTo } : undefined })}
               className="font-semibold hover:underline" style={{ color: "#3D38F5" }}>
               Sign in
             </button>

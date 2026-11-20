@@ -6,6 +6,10 @@ import prisma from "../config/prisma";
 import { createSession, revokeSession } from "../services/session.service";
 import { generateAndSendOTP, verifyOTP } from "../services/otp.service";
 import { env } from "../config/env";
+import {
+  isServiceUnavailable,
+  isUniqueConstraintViolation,
+} from "../utils/dependency-error";
 
 const googleClient = new OAuth2Client(env.GOOGLE.CLIENT_ID);
 
@@ -131,8 +135,10 @@ export const verifyRegistrationOTP = async (
     });
   } catch (error) {
     console.error("[Auth] Registration OTP verification failed:", error);
-    return res.status(500).json({
-      message: "Unable to verify the code. Please try again.",
+    return res.status(isServiceUnavailable(error) ? 503 : 500).json({
+      message: isServiceUnavailable(error)
+        ? "Verification service is temporarily unavailable. Please try again."
+        : "Unable to verify the code. Please try again.",
     });
   }
 };
@@ -226,8 +232,18 @@ export const register = async (
       }
     }
 
+    if (isUniqueConstraintViolation(error)) {
+      return res.status(409).json({
+        message: "Unable to register with this email.",
+      });
+    }
+
     console.error("[Auth] Registration failed:", error);
-    return res.status(500).json({ message: "Registration failed." });
+    return res.status(isServiceUnavailable(error) ? 503 : 500).json({
+      message: isServiceUnavailable(error)
+        ? "Registration service is temporarily unavailable. Please try again."
+        : "Registration failed.",
+    });
   }
 };
 
@@ -292,8 +308,10 @@ export const login = async (req: Request, res: Response) => {
 
         console.error("[Auth] Login failed:", error);
 
-        return res.status(500).json({
-            message: "Login failed",
+        return res.status(isServiceUnavailable(error) ? 503 : 500).json({
+            message: isServiceUnavailable(error)
+              ? "Login service is temporarily unavailable. Please try again."
+              : "Login failed",
         });
     }
 };
@@ -328,8 +346,10 @@ export const verifyEmail = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("[Auth] Email verification failed:", error);
-    return res.status(500).json({
-      message: "Email verification failed. Please try again.",
+    return res.status(isServiceUnavailable(error) ? 503 : 500).json({
+      message: isServiceUnavailable(error)
+        ? "Verification service is temporarily unavailable. Please try again."
+        : "Email verification failed. Please try again.",
     });
   }
 };
@@ -396,7 +416,11 @@ export const getMe = async (req: Request, res: Response) => {
     return sendSafeUser(res, user);
   } catch (error) {
     console.error("[Auth] Fetch user failed:", error);
-    return res.status(500).json({ message: "Failed to fetch user" });
+    return res.status(isServiceUnavailable(error) ? 503 : 500).json({
+      message: isServiceUnavailable(error)
+        ? "Account service is temporarily unavailable. Please try again."
+        : "Failed to fetch user",
+    });
   }
 };
 
@@ -414,15 +438,25 @@ export const logout = async (
     res.clearCookie("token", {
       httpOnly: true,
       secure: env.NODE_ENV === "production",
-      sameSite: "none",
+      sameSite: env.NODE_ENV === "production" ? "none" : "lax",
       path: "/",
     });
 
     res.status(200).json({ message: "Logged out successfully" });
   } catch (error) {
     console.error("[Auth] Logout failed:", error);
-    res.status(500).json({
-      message: "Unable to log out. Please try again.",
+
+    // Clear the browser cookie even if the database is temporarily unavailable.
+    // The response communicates that server-side revocation may need retry/recovery.
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure: env.NODE_ENV === "production",
+      sameSite: env.NODE_ENV === "production" ? "none" : "lax",
+      path: "/",
+    });
+
+    res.status(503).json({
+      message: "The local session was cleared, but server-side logout could not be confirmed.",
     });
   }
 };
@@ -437,10 +471,25 @@ export const googleLogin = async (req: Request, res: Response) => {
             });
         }
 
-        const ticket = await googleClient.verifyIdToken({
-            idToken: token,
-            audience: env.GOOGLE.CLIENT_ID,
-        });
+        let ticket;
+        try {
+            ticket = await googleClient.verifyIdToken({
+                idToken: token,
+                audience: env.GOOGLE.CLIENT_ID,
+            });
+        } catch (verificationError) {
+            if (isServiceUnavailable(verificationError)) {
+                console.error("[Auth] Google token verification service unavailable:", verificationError);
+                return res.status(503).json({
+                    message: "Google sign-in is temporarily unavailable. Please try again.",
+                });
+            }
+
+            console.warn("[Auth] Google rejected an ID token.");
+            return res.status(401).json({
+                message: "Google credential is invalid or expired. Please try again.",
+            });
+        }
 
         const payload = ticket.getPayload();
 
@@ -500,8 +549,10 @@ export const googleLogin = async (req: Request, res: Response) => {
 
         console.error("[Auth] Google login failed:", error);
 
-        return res.status(500).json({
-            message: "Google login failed",
+        return res.status(isServiceUnavailable(error) ? 503 : 500).json({
+            message: isServiceUnavailable(error)
+              ? "Google sign-in is temporarily unavailable. Please try again."
+              : "Google login failed",
         });
     }
 };

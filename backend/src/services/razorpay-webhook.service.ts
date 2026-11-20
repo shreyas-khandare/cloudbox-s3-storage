@@ -6,6 +6,8 @@ import {
 } from "@prisma/client";
 
 import prisma from "../config/prisma";
+import { processRefundProcessedEvent } from "./razorpay-refund.service";
+import { parseSubscriptionChargedEvent, unwrapRazorpayWebhookPayload } from "../utils/razorpay-webhook-payload";
 
 import {
     SUBSCRIPTION_PLANS,
@@ -64,6 +66,14 @@ export const activateSubscription = async (
         );
       }
 
+      if (
+        existingPayment.status === PaymentStatus.REFUNDED ||
+        existingPayment.status === PaymentStatus.PARTIALLY_REFUNDED
+      ) {
+        // A delayed charged event must never undo an already-recorded refund.
+        return { duplicate: true, refunded: true };
+      }
+
       if (existingPayment.status !== PaymentStatus.CAPTURED) {
         await tx.payment.update({
           where: { id: existingPayment.id },
@@ -119,51 +129,16 @@ export const activateSubscription = async (
 export const processSubscriptionChargedEvent = async (
   payload: any
 ) => {
-  const subscription = payload?.subscription?.entity;
-  const payment = payload?.payment?.entity;
-
-  if (
-    !subscription?.id ||
-    !payment?.id ||
-    payment.subscription_id !== subscription.id ||
-    payment.status !== "captured" ||
-    !Number.isInteger(payment.amount) ||
-    payment.amount <= 0 ||
-    payment.currency !== "INR" ||
-    !Number.isFinite(payment.created_at) ||
-    !Number.isFinite(subscription.current_start) ||
-    !Number.isFinite(subscription.current_end)
-  ) {
-    throw new Error("Invalid subscription.charged payload");
-  }
-
-  const currentPeriodStart = new Date(
-    subscription.current_start * 1000
-  );
-
-  const currentPeriodEnd = new Date(
-    subscription.current_end * 1000
-  );
-
-  const paidAt = new Date(payment.created_at * 1000);
-
-  if (
-    !Number.isFinite(currentPeriodStart.getTime()) ||
-    !Number.isFinite(currentPeriodEnd.getTime()) ||
-    !Number.isFinite(paidAt.getTime()) ||
-    currentPeriodEnd <= currentPeriodStart
-  ) {
-    throw new Error("Invalid subscription billing period");
-  }
+  const charge = parseSubscriptionChargedEvent(payload);
 
   return activateSubscription(
-    subscription.id,
-    payment.id,
-    payment.amount,
-    payment.currency,
-    paidAt,
-    currentPeriodStart,
-    currentPeriodEnd
+    charge.subscriptionId,
+    charge.paymentId,
+    charge.amount,
+    charge.currency,
+    charge.paidAt,
+    charge.currentPeriodStart,
+    charge.currentPeriodEnd
   );
 };
 
@@ -200,7 +175,11 @@ export const handlePaymentFailure = async (
     });
 
     // Never overwrite a successfully captured payment.
-    if (existingPayment?.status === PaymentStatus.CAPTURED) {
+    if (
+      existingPayment?.status === PaymentStatus.CAPTURED ||
+      existingPayment?.status === PaymentStatus.REFUNDED ||
+      existingPayment?.status === PaymentStatus.PARTIALLY_REFUNDED
+    ) {
       return { duplicate: true };
     }
 
@@ -285,10 +264,12 @@ export const processPaymentFailedEvent = async (
     payload: any
 ) => {
     const payment = payload?.payment?.entity;
+    const subscriptionId =
+      payment?.subscription_id ?? payload?.subscription?.entity?.id;
 
     if (
         !payment?.id ||
-        !payment?.subscription_id ||
+        !subscriptionId ||
         payment.status !== "failed" ||
         !Number.isInteger(payment.amount) ||
         typeof payment.currency !== "string"
@@ -297,7 +278,7 @@ export const processPaymentFailedEvent = async (
     }
 
     return handlePaymentFailure(
-        payment.subscription_id,
+        subscriptionId,
         payment.id,
         payment.amount,
         payment.currency,
@@ -366,29 +347,42 @@ export const processRazorpayWebhookEvent = async (
   }
 
   try {
+    // The database stores the complete signed Razorpay event envelope.
+    // Normalize it once before dispatching to handlers that consume the
+    // inner resource payload (subscription/payment entities).
+    const eventPayload = unwrapRazorpayWebhookPayload(webhookEvent.payload);
+
     switch (webhookEvent.eventType) {
       case "subscription.charged":
-        await processSubscriptionChargedEvent(webhookEvent.payload);
+        await processSubscriptionChargedEvent(eventPayload);
+        break;
+
+      case "subscription.activated":
+        await processSubscriptionActivatedEvent(eventPayload);
         break;
 
       case "payment.failed":
-        await processPaymentFailedEvent(webhookEvent.payload);
+        await processPaymentFailedEvent(eventPayload);
+        break;
+
+      case "refund.processed":
+        await processRefundProcessedEvent(eventPayload);
         break;
 
       case "subscription.cancelled":
-        await processSubscriptionCancelledEvent(webhookEvent.payload);
+        await processSubscriptionCancelledEvent(eventPayload);
         break;
 
       case "subscription.pending":
-        await processSubscriptionPendingEvent(webhookEvent.payload);
+        await processSubscriptionPendingEvent(eventPayload);
         break;
 
       case "subscription.halted":
-        await processSubscriptionHaltedEvent(webhookEvent.payload);
+        await processSubscriptionHaltedEvent(eventPayload);
         break;
 
       case "subscription.resumed":
-        await processSubscriptionResumedEvent(webhookEvent.payload);
+        await processSubscriptionResumedEvent(eventPayload);
         break;
 
       default:
@@ -427,6 +421,94 @@ export const processRazorpayWebhookEvent = async (
 
     throw error;
   }
+};
+
+
+/**
+ * Records the Razorpay subscription lifecycle transition to ACTIVE.
+ *
+ * This event alone does not prove that the plan amount was captured.
+ * Paid plan/storage entitlements are therefore granted only by the
+ * subscription.charged handler after payment amount and capture checks.
+ */
+export const processSubscriptionActivatedEvent = async (
+  payload: any
+) => {
+  const razorpaySubscription = payload?.subscription?.entity;
+
+  if (
+    !razorpaySubscription?.id ||
+    razorpaySubscription.status !== "active"
+  ) {
+    throw new Error("Invalid subscription.activated payload");
+  }
+
+  const currentPeriodStart = Number.isFinite(razorpaySubscription.current_start)
+    ? new Date(razorpaySubscription.current_start * 1000)
+    : null;
+  const currentPeriodEnd = Number.isFinite(razorpaySubscription.current_end)
+    ? new Date(razorpaySubscription.current_end * 1000)
+    : null;
+
+  if (
+    (currentPeriodStart && !Number.isFinite(currentPeriodStart.getTime())) ||
+    (currentPeriodEnd && !Number.isFinite(currentPeriodEnd.getTime())) ||
+    (currentPeriodStart &&
+      currentPeriodEnd &&
+      currentPeriodEnd <= currentPeriodStart)
+  ) {
+    throw new Error("Invalid subscription billing period");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const subscription = await tx.subscription.findUnique({
+      where: {
+        razorpaySubscriptionId: razorpaySubscription.id,
+      },
+    });
+
+    if (!subscription) {
+      throw new Error("Subscription not found");
+    }
+
+    if (
+      subscription.status === SubscriptionStatus.CANCELLED ||
+      subscription.status === SubscriptionStatus.EXPIRED ||
+      subscription.status === SubscriptionStatus.PAST_DUE ||
+      subscription.status === SubscriptionStatus.HALTED ||
+      subscription.status === SubscriptionStatus.REFUNDED
+    ) {
+      return { ignored: true, awaitingCharge: true };
+    }
+
+    if (
+      razorpaySubscription.plan_id &&
+      razorpaySubscription.plan_id !== subscription.razorpayPlanId
+    ) {
+      throw new Error("Razorpay plan does not match local subscription");
+    }
+
+    await tx.subscription.update({
+      where: { id: subscription.id },
+      data: {
+        status: SubscriptionStatus.ACTIVE,
+        ...(currentPeriodStart ? { currentPeriodStart } : {}),
+        ...(currentPeriodEnd ? { currentPeriodEnd } : {}),
+      },
+    });
+
+    await tx.user.update({
+      where: { id: subscription.userId },
+      data: {
+        subscriptionStatus: SubscriptionStatus.ACTIVE,
+      },
+    });
+
+    return {
+      activated: true,
+      awaitingCharge: true,
+    };
+  });
 };
 
 
@@ -532,7 +614,8 @@ export const processSubscriptionPendingEvent = async (
       subscription.status === SubscriptionStatus.CANCELLED ||
       subscription.status === SubscriptionStatus.EXPIRED ||
       subscription.status === SubscriptionStatus.ACTIVE ||
-      subscription.status === SubscriptionStatus.HALTED
+      subscription.status === SubscriptionStatus.HALTED ||
+      subscription.status === SubscriptionStatus.REFUNDED
     ) {
       return { ignored: true };
     }
@@ -587,7 +670,8 @@ export const processSubscriptionHaltedEvent = async (
     if (
       subscription.status === SubscriptionStatus.CANCELLED ||
       subscription.status === SubscriptionStatus.EXPIRED ||
-      subscription.status === SubscriptionStatus.ACTIVE
+      subscription.status === SubscriptionStatus.ACTIVE ||
+      subscription.status === SubscriptionStatus.REFUNDED
     ) {
       return { ignored: true };
     }
@@ -647,7 +731,8 @@ export const processSubscriptionResumedEvent = async (
 
   if (
     subscription.status === SubscriptionStatus.CANCELLED ||
-    subscription.status === SubscriptionStatus.EXPIRED
+    subscription.status === SubscriptionStatus.EXPIRED ||
+    subscription.status === SubscriptionStatus.REFUNDED
   ) {
     return { ignored: true };
   }
