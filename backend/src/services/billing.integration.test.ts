@@ -419,6 +419,32 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       assert.equal(subscription?.status, SubscriptionStatus.ACTIVE);
     });
 
+    await t.test("subscription.authenticated does not grant paid access", async () => {
+      const eventId = await saveWebhook(
+        "subscription.authenticated",
+        {
+          subscription: {
+            entity: {
+              id: razorpaySubscriptionId,
+              status: "authenticated",
+            },
+          },
+        },
+        "authenticated"
+      );
+
+      await processRazorpayWebhookEvent(eventId);
+
+      const [subscription, updatedUser] = await Promise.all([
+        prisma.subscription.findUnique({ where: { razorpaySubscriptionId } }),
+        prisma.user.findUnique({ where: { id: user.id } }),
+      ]);
+
+      assert.equal(subscription?.status, SubscriptionStatus.ACTIVE);
+      assert.equal(updatedUser?.plan, Plan.PRO);
+      assert.equal(updatedUser?.subscriptionStatus, SubscriptionStatus.ACTIVE);
+    });
+
     await t.test("a new failed renewal moves an active subscription into its grace period", async () => {
       const eventId = await saveWebhook(
         "payment.failed",
