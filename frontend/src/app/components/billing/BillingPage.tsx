@@ -78,6 +78,25 @@ export function BillingPage({ navigate }: Props) {
     return () => { mounted = false; };
   }, [loadBilling]);
 
+  // Refresh billing when the customer returns from Razorpay hosted
+  // checkout or switches back to this tab after a payment attempt.
+  useEffect(() => {
+    const refreshOnReturn = () => {
+      if (document.visibilityState !== "visible") return;
+      void Promise.all([loadBilling(), refreshUser()]).catch(() => {
+        // Preserve the current view; the explicit Refresh action remains available.
+      });
+    };
+
+    window.addEventListener("focus", refreshOnReturn);
+    document.addEventListener("visibilitychange", refreshOnReturn);
+
+    return () => {
+      window.removeEventListener("focus", refreshOnReturn);
+      document.removeEventListener("visibilitychange", refreshOnReturn);
+    };
+  }, [loadBilling, refreshUser]);
+
   const refresh = async () => {
     setError("");
     setRefreshing(true);
