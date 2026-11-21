@@ -184,6 +184,7 @@ export const processRefundProcessedEvent = async (
     });
 
     let entitlementRevoked = false;
+    let shouldCancelProviderSubscription = false;
 
     if (isFullyRefunded) {
       const subscription = payment.subscription;
@@ -200,6 +201,12 @@ export const processRefundProcessedEvent = async (
           paidAt >= periodStart - 24 * 60 * 60 * 1000 &&
           (periodEnd === null || paidAt < periodEnd)
         );
+
+      shouldCancelProviderSubscription =
+        isCurrentBillingCyclePayment &&
+        subscription.status !== SubscriptionStatus.CANCELLED &&
+        subscription.status !== SubscriptionStatus.EXPIRED &&
+        subscription.status !== SubscriptionStatus.REFUNDED;
 
       if (
         isCurrentBillingCyclePayment &&
@@ -268,12 +275,7 @@ export const processRefundProcessedEvent = async (
       paymentStatus,
       amountRefunded: updatedPayment.amountRefunded,
       entitlementRevoked,
-      shouldCancelProviderSubscription:
-        isFullyRefunded &&
-        subscription.status !== SubscriptionStatus.CANCELLED &&
-        subscription.status !== SubscriptionStatus.EXPIRED &&
-        subscription.status !== SubscriptionStatus.REFUNDED &&
-        isCurrentBillingCyclePayment,
+      shouldCancelProviderSubscription,
       razorpaySubscriptionId: subscription.razorpaySubscriptionId,
     };
   });
