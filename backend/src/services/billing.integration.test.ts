@@ -676,6 +676,70 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       assert.equal(result.subscription.razorpaySubscriptionId, newSubscriptionId);
     });
 
+    await t.test("preserves paid access when Razorpay confirms a scheduled cycle-end cancellation", async () => {
+      const newSubscriptionId = `sub_scheduled_cancel_${prefix}`;
+      const scheduledEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+      const created = await createSubscription(user.id, Plan.BUSINESS, {
+        create: async () => ({
+          id: newSubscriptionId,
+          short_url: `https://rzp.io/i/scheduled-cancel-${prefix}`,
+        }),
+        cancel: async () => undefined,
+      });
+
+      await prisma.subscription.update({
+        where: { id: created.subscription.id },
+        data: {
+          status: SubscriptionStatus.ACTIVE,
+          cancelAtPeriodEnd: true,
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: scheduledEnd,
+        },
+      });
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          plan: Plan.BUSINESS,
+          subscriptionStatus: SubscriptionStatus.ACTIVE,
+          currentPeriodEnd: scheduledEnd,
+        },
+      });
+
+      const eventId = `evt_scheduled_cancel_${prefix}`;
+      webhookEventIds.push(eventId);
+      await prisma.razorpayWebhookEvent.create({
+        data: {
+          eventId,
+          eventType: "subscription.cancelled",
+          razorpaySubscriptionId: newSubscriptionId,
+          payload: envelope("subscription.cancelled", {
+            subscription: {
+              entity: {
+                id: newSubscriptionId,
+                status: "cancelled",
+                ended_at: Math.floor(Date.now() / 1000),
+              },
+            },
+          }),
+          status: WebhookStatus.PENDING,
+        },
+      });
+
+      await processRazorpayWebhookEvent(eventId);
+
+      const [subscription, updatedUser] = await Promise.all([
+        prisma.subscription.findUnique({ where: { id: created.subscription.id } }),
+        prisma.user.findUnique({ where: { id: user.id } }),
+      ]);
+
+      assert.equal(subscription?.status, SubscriptionStatus.ACTIVE);
+      assert.equal(subscription?.cancelAtPeriodEnd, true);
+      assert.equal(updatedUser?.plan, Plan.BUSINESS);
+      assert.equal(updatedUser?.subscriptionStatus, SubscriptionStatus.ACTIVE);
+      assert.equal(updatedUser?.currentPeriodEnd?.getTime(), scheduledEnd.getTime());
+    });
+
     await t.test("expires a refunded subscription after end-of-period cancellation", async () => {
       const { expireSubscriptions } = await import("./subscription-expiry.service");
 
