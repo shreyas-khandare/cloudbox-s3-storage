@@ -222,8 +222,11 @@ export const handlePaymentFailure = async (
     // Do not change already cancelled or expired subscriptions.
     if (
       subscription.status === SubscriptionStatus.CANCELLED ||
-      subscription.status === SubscriptionStatus.EXPIRED
+      subscription.status === SubscriptionStatus.EXPIRED ||
+      subscription.status === SubscriptionStatus.REFUNDED
     ) {
+      // A full refund is terminal even while provider-side cancellation is
+      // awaiting retry. Record the failed invoice, but do not reopen billing.
       return { duplicate: false };
     }
 
