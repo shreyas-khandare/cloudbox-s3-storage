@@ -350,6 +350,35 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       assert.equal(resumedUser?.plan, Plan.FREE);
     });
 
+    await t.test("subscription.authenticated does not grant paid access", async () => {
+      const eventId = await saveWebhook(
+        "subscription.authenticated",
+        {
+          subscription: {
+            entity: {
+              id: razorpaySubscriptionId,
+              status: "authenticated",
+            },
+          },
+        },
+        "authenticated"
+      );
+
+      await processRazorpayWebhookEvent(eventId);
+
+      const [subscription, updatedUser] = await Promise.all([
+        prisma.subscription.findUnique({ where: { razorpaySubscriptionId } }),
+        prisma.user.findUnique({ where: { id: user.id } }),
+      ]);
+
+      // The preceding pending/halted/resumed events must not be promoted by
+      // authentication alone. Only a captured subscription.charged event
+      // grants paid plan/storage entitlements.
+      assert.equal(subscription?.status, SubscriptionStatus.HALTED);
+      assert.equal(updatedUser?.plan, Plan.FREE);
+      assert.equal(updatedUser?.subscriptionStatus, SubscriptionStatus.HALTED);
+    });
+
     await t.test("processes the first captured charge and grants the Pro entitlement", async () => {
       const eventId = await saveWebhook(
         "subscription.charged",
@@ -417,32 +446,6 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       });
       assert.equal(payment?.status, PaymentStatus.CAPTURED);
       assert.equal(subscription?.status, SubscriptionStatus.ACTIVE);
-    });
-
-    await t.test("subscription.authenticated does not grant paid access", async () => {
-      const eventId = await saveWebhook(
-        "subscription.authenticated",
-        {
-          subscription: {
-            entity: {
-              id: razorpaySubscriptionId,
-              status: "authenticated",
-            },
-          },
-        },
-        "authenticated"
-      );
-
-      await processRazorpayWebhookEvent(eventId);
-
-      const [subscription, updatedUser] = await Promise.all([
-        prisma.subscription.findUnique({ where: { razorpaySubscriptionId } }),
-        prisma.user.findUnique({ where: { id: user.id } }),
-      ]);
-
-      assert.equal(subscription?.status, SubscriptionStatus.ACTIVE);
-      assert.equal(updatedUser?.plan, Plan.PRO);
-      assert.equal(updatedUser?.subscriptionStatus, SubscriptionStatus.ACTIVE);
     });
 
     await t.test("a new failed renewal moves an active subscription into its grace period", async () => {
