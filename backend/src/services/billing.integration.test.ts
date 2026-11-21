@@ -441,6 +441,98 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       }
     });
 
+    await t.test("subscription.completed does not use an earlier cycle payment to preserve final-period access", async () => {
+      const completedUser = await prisma.user.create({
+        data: {
+          name: "CloudBox Completed Old Payment Test",
+          email: `completed-old-payment-${prefix}@example.test`,
+          emailVerified: true,
+        },
+        select: { id: true },
+      });
+      const completedSubscriptionId = `sub_completed_old_payment_${prefix}`;
+      const completedPaymentId = `pay_completed_old_payment_${prefix}`;
+      const completedEventId = `evt_completed_old_payment_${prefix}`;
+      const currentStart = new Date(Date.now() - 60 * 1000);
+      const currentEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+      try {
+        await prisma.subscription.create({
+          data: {
+            userId: completedUser.id,
+            plan: Plan.PRO,
+            razorpayPlanId: "plan_test_pro",
+            razorpaySubscriptionId: completedSubscriptionId,
+            status: SubscriptionStatus.ACTIVE,
+            currentPeriodStart: currentStart,
+            currentPeriodEnd: currentEnd,
+          },
+        });
+        await prisma.user.update({
+          where: { id: completedUser.id },
+          data: {
+            plan: Plan.PRO,
+            subscriptionStatus: SubscriptionStatus.ACTIVE,
+            currentPeriodEnd: currentEnd,
+          },
+        });
+        await prisma.payment.create({
+          data: {
+            userId: completedUser.id,
+            subscriptionId: (await prisma.subscription.findUniqueOrThrow({
+              where: { razorpaySubscriptionId: completedSubscriptionId },
+              select: { id: true },
+            })).id,
+            razorpayPaymentId: completedPaymentId,
+            amount: 14900,
+            currency: "INR",
+            status: PaymentStatus.CAPTURED,
+            paidAt: new Date(currentStart.getTime() - 24 * 60 * 60 * 1000),
+          },
+        });
+        await prisma.razorpayWebhookEvent.create({
+          data: {
+            eventId: completedEventId,
+            eventType: "subscription.completed",
+            payload: envelope("subscription.completed", {
+              subscription: {
+                entity: {
+                  id: completedSubscriptionId,
+                  status: "completed",
+                  current_start: Math.floor(currentStart.getTime() / 1000),
+                  current_end: Math.floor(currentEnd.getTime() / 1000),
+                },
+              },
+            }),
+            razorpaySubscriptionId: completedSubscriptionId,
+            status: WebhookStatus.PENDING,
+          },
+        });
+
+        await processRazorpayWebhookEvent(completedEventId);
+
+        const [completedSubscription, completedAccount] = await Promise.all([
+          prisma.subscription.findUnique({
+            where: { razorpaySubscriptionId: completedSubscriptionId },
+          }),
+          prisma.user.findUnique({ where: { id: completedUser.id } }),
+        ]);
+        assert.equal(completedSubscription?.status, SubscriptionStatus.CANCELLED);
+        assert.equal(completedAccount?.plan, Plan.FREE);
+      } finally {
+        await prisma.razorpayWebhookEvent.deleteMany({ where: { eventId: completedEventId } });
+        const completedSubscription = await prisma.subscription.findUnique({
+          where: { razorpaySubscriptionId: completedSubscriptionId },
+          select: { id: true },
+        });
+        if (completedSubscription) {
+          await prisma.payment.deleteMany({ where: { subscriptionId: completedSubscription.id } });
+        }
+        await prisma.subscription.deleteMany({ where: { razorpaySubscriptionId: completedSubscriptionId } });
+        await prisma.user.delete({ where: { id: completedUser.id } });
+      }
+    });
+
     await t.test("processes the first captured charge and grants the Pro entitlement", async () => {
       const eventId = await saveWebhook(
         "subscription.charged",
