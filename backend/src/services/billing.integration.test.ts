@@ -651,6 +651,33 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       });
       assert.equal(failedCancellationEvent?.status, WebhookStatus.FAILED);
 
+      const delayedFailureEvent = await saveWebhook(
+        "payment.failed",
+        {
+          payment: {
+            entity: {
+              id: `pay_failed_after_refund_${prefix}`,
+              subscription_id: razorpaySubscriptionId,
+              amount: 14900,
+              currency: "INR",
+              status: "failed",
+              error_description: "Delayed renewal failure after refund",
+            },
+          },
+        },
+        "failed-after-full-refund"
+      );
+      await processRazorpayWebhookEvent(delayedFailureEvent);
+
+      const [refundedSubscription, refundedUser] = await Promise.all([
+        prisma.subscription.findUnique({
+          where: { razorpaySubscriptionId },
+        }),
+        prisma.user.findUnique({ where: { id: user.id } }),
+      ]);
+      assert.equal(refundedSubscription?.status, SubscriptionStatus.REFUNDED);
+      assert.equal(refundedUser?.plan, Plan.FREE);
+
       // A webhook retry must not count the refund twice, but must retry the
       // provider cancellation that failed after the local refund committed.
       await processRazorpayWebhookEvent(eventId, {
