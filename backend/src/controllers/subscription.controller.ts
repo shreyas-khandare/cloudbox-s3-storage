@@ -3,7 +3,7 @@ import { Plan, SubscriptionStatus } from "@prisma/client";
 import { createSubscription } from "../services/subscription.service";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
 import { MAX_SINGLE_UPLOAD_SIZE } from "../config/upload";
-import { cancelRazorpaySubscription } from "../services/razorpay.service";
+import { cancelRazorpaySubscription, isDefinitiveRazorpayRejection } from "../services/razorpay.service";
 import prisma from "../config/prisma";
 
 export const createSubscriptionController = async (
@@ -308,11 +308,20 @@ export const cancelSubscriptionController = async (
       keepAccessUntilPeriodEnd
     );
   } catch (error) {
-    console.error("[Billing] Razorpay rejected cancellation:", error);
+    console.error("[Billing] Razorpay cancellation request failed:", error);
 
-    // The provider did not accept the request, so remove the local intent.
-    // If rollback fails, return a distinct error: the local state then needs
-    // reconciliation before the customer retries.
+    // Only a provider 4xx response proves that Razorpay rejected the request.
+    // Network errors, timeouts and 5xx responses are ambiguous: Razorpay may
+    // have committed the cancellation before the response was lost.
+    if (!isDefinitiveRazorpayRejection(error)) {
+      return res.status(503).json({
+        message: "Razorpay's cancellation outcome could not be confirmed. CloudBox has retained the cancellation intent; refresh Billing later or contact support before retrying.",
+        reconciliationRequired: true,
+      });
+    }
+
+    // A definitive 4xx rejection means the provider did not accept the request,
+    // so the pre-written cycle-end intent can safely be rolled back.
     if (keepAccessUntilPeriodEnd) {
       try {
         await prisma.subscription.updateMany({
@@ -323,15 +332,16 @@ export const cancelSubscriptionController = async (
           data: { cancelAtPeriodEnd: false },
         });
       } catch (rollbackError) {
-        console.error("[Billing] Failed to roll back scheduled cancellation intent:", rollbackError);
+        console.error("[Billing] Failed to roll back rejected cancellation intent:", rollbackError);
         return res.status(503).json({
-          message: "Razorpay did not confirm cancellation and CloudBox could not roll back the pending request. Refresh Billing before retrying.",
+          message: "Razorpay rejected cancellation and CloudBox could not roll back the pending request. Refresh Billing before retrying.",
+          reconciliationRequired: true,
         });
       }
     }
 
     return res.status(502).json({
-      message: "Razorpay could not cancel the subscription. No cancellation was scheduled.",
+      message: "Razorpay rejected the cancellation request. No cancellation was scheduled.",
     });
   }
 
