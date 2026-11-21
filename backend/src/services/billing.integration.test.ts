@@ -541,16 +541,47 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
         "full-refund"
       );
 
-      await processRazorpayWebhookEvent(eventId);
+      let providerCancellationAttempts = 0;
+      await assert.rejects(
+        processRazorpayWebhookEvent(eventId, {
+          cancelRefundedSubscription: async (providerSubscriptionId) => {
+            providerCancellationAttempts += 1;
+            assert.equal(providerSubscriptionId, razorpaySubscriptionId);
+            throw new Error("Razorpay temporarily unavailable");
+          },
+        }),
+        /Razorpay temporarily unavailable/
+      );
 
-      const [payment, updatedUser, subscription] = await Promise.all([
+      const failedCancellationEvent = await prisma.razorpayWebhookEvent.findUnique({
+        where: { eventId },
+        select: { status: true },
+      });
+      assert.equal(failedCancellationEvent?.status, WebhookStatus.FAILED);
+
+      // A webhook retry must not count the refund twice, but must retry the
+      // provider cancellation that failed after the local refund committed.
+      await processRazorpayWebhookEvent(eventId, {
+        cancelRefundedSubscription: async (providerSubscriptionId) => {
+          providerCancellationAttempts += 1;
+          assert.equal(providerSubscriptionId, razorpaySubscriptionId);
+        },
+      });
+      assert.equal(providerCancellationAttempts, 2);
+
+      const [payment, updatedUser, subscription, processedEvent] = await Promise.all([
         prisma.payment.findUnique({ where: { razorpayPaymentId } }),
         prisma.user.findUnique({ where: { id: user.id } }),
         prisma.subscription.findUnique({
           where: { razorpaySubscriptionId },
         }),
+        prisma.razorpayWebhookEvent.findUnique({
+          where: { eventId },
+          select: { status: true },
+        }),
       ]);
 
+      assert.equal(processedEvent?.status, WebhookStatus.PROCESSED);
       assert.equal(payment?.status, PaymentStatus.REFUNDED);
       assert.equal(payment?.amountRefunded, 14900);
       assert.equal(updatedUser?.plan, Plan.FREE);
