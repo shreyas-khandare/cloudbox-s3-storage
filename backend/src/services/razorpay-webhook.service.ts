@@ -860,7 +860,34 @@ export const processSubscriptionCompletedEvent = async (payload: any) => {
     const periodEnd = providerPeriodEnd ?? subscription.currentPeriodEnd;
     const hasPaidTimeRemaining = Boolean(periodEnd && periodEnd > new Date());
 
-    if (hasPaidTimeRemaining) {
+    // "completed" describes the provider subscription lifecycle, not proof
+    // that CloudBox received a successful charge. Preserve an existing
+    // entitlement only when a captured (or partially refunded) invoice is
+    // already recorded locally. Never grant a plan from this event alone.
+    const [user, paidPayment] = await Promise.all([
+      tx.user.findUnique({
+        where: { id: subscription.userId },
+        select: { plan: true },
+      }),
+      tx.payment.findFirst({
+        where: {
+          subscriptionId: subscription.id,
+          status: {
+            in: [
+              PaymentStatus.CAPTURED,
+              PaymentStatus.PARTIALLY_REFUNDED,
+            ],
+          },
+          amount: SUBSCRIPTION_PLANS[subscription.plan].price,
+        },
+        select: { id: true },
+      }),
+    ]);
+
+    const hasRecordedEntitlement =
+      user?.plan === subscription.plan && Boolean(paidPayment);
+
+    if (hasPaidTimeRemaining && hasRecordedEntitlement) {
       await tx.subscription.update({
         where: { id: subscription.id },
         data: {
@@ -873,14 +900,12 @@ export const processSubscriptionCompletedEvent = async (payload: any) => {
       await tx.user.update({
         where: { id: subscription.userId },
         data: {
-          plan: subscription.plan,
           subscriptionStatus: SubscriptionStatus.ACTIVE,
           currentPeriodEnd: periodEnd,
           gracePeriodEnd: null,
-          storageLimit: SUBSCRIPTION_PLANS[subscription.plan].storageLimit,
         },
       });
-      return { completed: true, accessUntil: periodEnd };
+      return { completed: true, accessUntil: periodEnd, entitlementPreserved: true };
     }
 
     await tx.subscription.update({
@@ -908,7 +933,7 @@ export const processSubscriptionCompletedEvent = async (payload: any) => {
       },
     });
 
-    if (!another) {
+    if (!another && user?.plan === subscription.plan) {
       await tx.user.update({
         where: { id: subscription.userId },
         data: {
@@ -921,14 +946,14 @@ export const processSubscriptionCompletedEvent = async (payload: any) => {
       });
     }
 
-    return { completed: true, accessUntil: null };
+    return {
+      completed: true,
+      accessUntil: null,
+      entitlementPreserved: false,
+    };
   });
 };
 
-/**
- * These events do not alter CloudBox entitlement. We validate and explicitly
- * acknowledge them rather than silently treating them as unknown events.
- */
 export const processSubscriptionInformationalEvent = async (
   payload: any,
   event: "updated" | "paused"
