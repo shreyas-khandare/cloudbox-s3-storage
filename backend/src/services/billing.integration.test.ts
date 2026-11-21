@@ -379,6 +379,69 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       assert.equal(updatedUser?.subscriptionStatus, SubscriptionStatus.HALTED);
     });
 
+    await t.test("subscription.completed cannot grant access without a recorded captured payment", async () => {
+      const completedUser = await prisma.user.create({
+        data: {
+          name: "CloudBox Completed Without Payment",
+          email: `completed-no-payment-${prefix}@example.test`,
+          emailVerified: true,
+        },
+        select: { id: true },
+      });
+      const completedSubscriptionId = `sub_completed_no_payment_${prefix}`;
+      const completedEventId = `evt_completed_no_payment_${prefix}`;
+
+      try {
+        await prisma.subscription.create({
+          data: {
+            userId: completedUser.id,
+            plan: Plan.PRO,
+            razorpayPlanId: "plan_test_pro",
+            razorpaySubscriptionId: completedSubscriptionId,
+            status: SubscriptionStatus.CREATED,
+          },
+        });
+        await prisma.razorpayWebhookEvent.create({
+          data: {
+            eventId: completedEventId,
+            eventType: "subscription.completed",
+            payload: envelope("subscription.completed", {
+              subscription: {
+                entity: {
+                  id: completedSubscriptionId,
+                  status: "completed",
+                  current_end: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+                },
+              },
+            }),
+            razorpaySubscriptionId: completedSubscriptionId,
+            status: WebhookStatus.PENDING,
+          },
+        });
+
+        await processRazorpayWebhookEvent(completedEventId);
+
+        const [completedSubscription, completedAccount] = await Promise.all([
+          prisma.subscription.findUnique({
+            where: { razorpaySubscriptionId: completedSubscriptionId },
+          }),
+          prisma.user.findUnique({ where: { id: completedUser.id } }),
+        ]);
+
+        assert.equal(completedSubscription?.status, SubscriptionStatus.CANCELLED);
+        assert.equal(completedAccount?.plan, Plan.FREE);
+        assert.equal(completedAccount?.subscriptionStatus, SubscriptionStatus.FREE);
+      } finally {
+        await prisma.razorpayWebhookEvent.deleteMany({
+          where: { eventId: completedEventId },
+        });
+        await prisma.subscription.deleteMany({
+          where: { razorpaySubscriptionId: completedSubscriptionId },
+        });
+        await prisma.user.delete({ where: { id: completedUser.id } });
+      }
+    });
+
     await t.test("processes the first captured charge and grants the Pro entitlement", async () => {
       const eventId = await saveWebhook(
         "subscription.charged",
