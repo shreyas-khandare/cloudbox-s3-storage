@@ -336,10 +336,7 @@ export const cancelSubscriptionController = async (
   }
 
   try {
-    if (keepAccessUntilPeriodEnd) {
-      // The intent was persisted before the provider call to close the
-      // webhook race. No second write is required here.
-    } else {
+    if (!keepAccessUntilPeriodEnd) {
       await prisma.$transaction(async (tx) => {
         await tx.subscription.update({
           where: { id: subscription.id },
