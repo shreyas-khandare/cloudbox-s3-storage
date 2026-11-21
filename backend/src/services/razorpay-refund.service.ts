@@ -78,14 +78,14 @@ export const processRefundProcessedEvent = async (
       throw new Error("Refund currency does not match the captured payment");
     }
 
-    if (payment.status === PaymentStatus.REFUNDED) {
-      // Any further refund against an already fully refunded payment is invalid.
-      throw new Error("Payment has already been fully refunded");
-    }
-
+    // REFUNDED is accepted here only so a retried webhook for the same
+    // refund ID can reach the idempotency check below and retry provider
+    // cancellation. A different refund ID still fails the guarded amount
+    // update and the transaction rolls back.
     const isRefundablePayment =
       payment.status === PaymentStatus.CAPTURED ||
-      payment.status === PaymentStatus.PARTIALLY_REFUNDED;
+      payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
+      payment.status === PaymentStatus.REFUNDED;
 
     if (!isRefundablePayment) {
       throw new Error("Refund does not match a captured INR payment");
