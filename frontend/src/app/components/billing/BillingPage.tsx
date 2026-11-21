@@ -95,7 +95,11 @@ export function BillingPage({ navigate }: Props) {
     const periodEnd = subscription?.currentPeriodEnd
       ? new Date(subscription.currentPeriodEnd)
       : null;
-    const canKeepAccess = Boolean(periodEnd && periodEnd > new Date());
+    const canKeepAccess = Boolean(
+      subscription?.status !== "REFUNDED" &&
+      periodEnd &&
+      periodEnd > new Date()
+    );
     const confirmation = canKeepAccess
       ? "Schedule cancellation at the end of the current billing period? Paid access will remain until then."
       : "Cancel this subscription now? This will stop future billing and keep the account on the Free plan.";
