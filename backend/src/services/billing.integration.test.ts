@@ -596,7 +596,10 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
         "late-charged"
       );
 
-      await processRazorpayWebhookEvent(eventId);
+      await assert.rejects(
+        processRazorpayWebhookEvent(eventId),
+        /cancelled, expired, or refunded subscription/
+      );
 
       const [payment, updatedUser, subscription] = await Promise.all([
         prisma.payment.findUnique({ where: { razorpayPaymentId } }),
@@ -608,7 +611,7 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
 
       assert.equal(payment?.status, PaymentStatus.REFUNDED);
       assert.equal(updatedUser?.plan, Plan.FREE);
-      assert.equal(subscription?.status, SubscriptionStatus.REFUNDED);
+      assert.equal(subscription?.status, SubscriptionStatus.CANCELLED);
     });
     await t.test("rejects a new captured payment against a fully refunded subscription", async () => {
       const newPaymentId = `pay_after_refund_${prefix}`;
