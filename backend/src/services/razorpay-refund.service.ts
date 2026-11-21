@@ -5,6 +5,7 @@ import {
 } from "@prisma/client";
 
 import prisma from "../config/prisma";
+import { ensureRazorpaySubscriptionCancelled } from "./razorpay.service";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
 import { unwrapRazorpayWebhookPayload } from "../utils/razorpay-webhook-payload";
 
@@ -21,7 +22,11 @@ type ProcessedRefund = {
  * Apply a final refund exactly once. Only refund.processed is used, so
  * pending refunds never revoke paid access.
  */
-export const processRefundProcessedEvent = async (payload: unknown) => {
+export const processRefundProcessedEvent = async (
+  payload: unknown,
+  cancelProviderSubscription: (subscriptionId: string) => Promise<unknown> =
+    ensureRazorpaySubscriptionCancelled
+) => {
   const eventPayload = unwrapRazorpayWebhookPayload(payload);
   const refund = eventPayload?.refund?.entity as ProcessedRefund | undefined;
 
@@ -45,13 +50,14 @@ export const processRefundProcessedEvent = async (payload: unknown) => {
     throw new Error("Invalid refund processed timestamp");
   }
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const payment = await tx.payment.findUnique({
       where: { razorpayPaymentId: refund.payment_id },
       include: {
         subscription: {
           select: {
             id: true,
+            razorpaySubscriptionId: true,
             userId: true,
             plan: true,
             status: true,
@@ -126,6 +132,10 @@ export const processRefundProcessedEvent = async (payload: unknown) => {
         duplicate: true,
         paymentStatus: latestPayment?.status ?? payment.status,
         amountRefunded: latestPayment?.amountRefunded ?? payment.amountRefunded,
+        shouldCancelProviderSubscription:
+          latestPayment?.status === PaymentStatus.REFUNDED &&
+          payment.subscription.status === SubscriptionStatus.REFUNDED,
+        razorpaySubscriptionId: payment.subscription.razorpaySubscriptionId,
       };
     }
 
@@ -258,6 +268,32 @@ export const processRefundProcessedEvent = async (payload: unknown) => {
       paymentStatus,
       amountRefunded: updatedPayment.amountRefunded,
       entitlementRevoked,
+      shouldCancelProviderSubscription:
+        isFullyRefunded &&
+        subscription.status !== SubscriptionStatus.CANCELLED &&
+        subscription.status !== SubscriptionStatus.EXPIRED &&
+        subscription.status !== SubscriptionStatus.REFUNDED &&
+        isCurrentBillingCyclePayment,
+      razorpaySubscriptionId: subscription.razorpaySubscriptionId,
     };
   });
+
+  // Do not perform network calls inside the database transaction. If Razorpay
+  // is unavailable, the webhook remains retryable; duplicate refund delivery
+  // reaches the same cancellation step without double-counting the refund.
+  if (
+    result.shouldCancelProviderSubscription &&
+    result.razorpaySubscriptionId
+  ) {
+    await cancelProviderSubscription(result.razorpaySubscriptionId);
+  }
+
+  return {
+    duplicate: result.duplicate,
+    paymentStatus: result.paymentStatus,
+    amountRefunded: result.amountRefunded,
+    ...( "entitlementRevoked" in result
+      ? { entitlementRevoked: result.entitlementRevoked }
+      : {}),
+  };
 };
