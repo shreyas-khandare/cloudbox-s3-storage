@@ -34,10 +34,11 @@ export const activateSubscription = async (
 
     if (
       subscription.status === SubscriptionStatus.CANCELLED ||
-      subscription.status === SubscriptionStatus.EXPIRED
+      subscription.status === SubscriptionStatus.EXPIRED ||
+      subscription.status === SubscriptionStatus.REFUNDED
     ) {
       throw new Error(
-        "Cannot activate a cancelled or expired subscription"
+        "Cannot activate a cancelled, expired, or refunded subscription"
       );
     }
 
