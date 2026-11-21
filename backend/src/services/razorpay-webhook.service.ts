@@ -394,6 +394,22 @@ export const processRazorpayWebhookEvent = async (
         await processSubscriptionResumedEvent(eventPayload);
         break;
 
+      case "subscription.authenticated":
+        await processSubscriptionAuthenticatedEvent(eventPayload);
+        break;
+
+      case "subscription.completed":
+        await processSubscriptionCompletedEvent(eventPayload);
+        break;
+
+      case "subscription.updated":
+        await processSubscriptionInformationalEvent(eventPayload, "updated");
+        break;
+
+      case "subscription.paused":
+        await processSubscriptionInformationalEvent(eventPayload, "paused");
+        break;
+
       default:
         console.log(
           `Webhook event not handled yet: ${webhookEvent.eventType}`
@@ -783,4 +799,150 @@ export const processSubscriptionResumedEvent = async (
     resumed: true,
     awaitingPaymentConfirmation: true,
   };
+};
+
+/**
+ * Authentication means the customer completed the first subscription
+ * authentication payment. It is not, by itself, proof that the plan invoice
+ * was captured; entitlement is still granted only by subscription.charged.
+ */
+export const processSubscriptionAuthenticatedEvent = async (payload: any) => {
+  const entity = payload?.subscription?.entity;
+  if (!entity?.id || entity.status !== "authenticated") {
+    throw new Error("Invalid subscription.authenticated payload");
+  }
+
+  const subscription = await prisma.subscription.findUnique({
+    where: { razorpaySubscriptionId: entity.id },
+    select: { status: true },
+  });
+
+  if (!subscription) throw new Error("Subscription not found");
+
+  return {
+    authenticated: true,
+    awaitingCharge: true,
+    entitlementGranted: false,
+  };
+};
+
+/**
+ * Razorpay emits completed when all invoices have been generated. Preserve
+ * the final paid period, then let the expiry scheduler downgrade the account.
+ */
+export const processSubscriptionCompletedEvent = async (payload: any) => {
+  const entity = payload?.subscription?.entity;
+  if (!entity?.id || entity.status !== "completed") {
+    throw new Error("Invalid subscription.completed payload");
+  }
+
+  const providerPeriodEnd = Number.isFinite(entity.current_end)
+    ? new Date(entity.current_end * 1000)
+    : null;
+  if (providerPeriodEnd && !Number.isFinite(providerPeriodEnd.getTime())) {
+    throw new Error("Invalid completed subscription period");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const subscription = await tx.subscription.findUnique({
+      where: { razorpaySubscriptionId: entity.id },
+    });
+    if (!subscription) throw new Error("Subscription not found");
+
+    if (
+      subscription.status === SubscriptionStatus.CANCELLED ||
+      subscription.status === SubscriptionStatus.EXPIRED ||
+      subscription.status === SubscriptionStatus.REFUNDED
+    ) {
+      return { ignored: true };
+    }
+
+    const periodEnd = providerPeriodEnd ?? subscription.currentPeriodEnd;
+    const hasPaidTimeRemaining = Boolean(periodEnd && periodEnd > new Date());
+
+    if (hasPaidTimeRemaining) {
+      await tx.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          status: SubscriptionStatus.ACTIVE,
+          currentPeriodEnd: periodEnd,
+          cancelAtPeriodEnd: true,
+          gracePeriodEnd: null,
+        },
+      });
+      await tx.user.update({
+        where: { id: subscription.userId },
+        data: {
+          plan: subscription.plan,
+          subscriptionStatus: SubscriptionStatus.ACTIVE,
+          currentPeriodEnd: periodEnd,
+          gracePeriodEnd: null,
+          storageLimit: SUBSCRIPTION_PLANS[subscription.plan].storageLimit,
+        },
+      });
+      return { completed: true, accessUntil: periodEnd };
+    }
+
+    await tx.subscription.update({
+      where: { id: subscription.id },
+      data: {
+        status: SubscriptionStatus.CANCELLED,
+        cancelledAt: new Date(),
+        endDate: new Date(),
+        cancelAtPeriodEnd: false,
+        gracePeriodEnd: null,
+      },
+    });
+
+    const another = await tx.subscription.findFirst({
+      where: {
+        userId: subscription.userId,
+        id: { not: subscription.id },
+        status: {
+          in: [
+            SubscriptionStatus.ACTIVE,
+            SubscriptionStatus.PAST_DUE,
+            SubscriptionStatus.HALTED,
+          ],
+        },
+      },
+    });
+
+    if (!another) {
+      await tx.user.update({
+        where: { id: subscription.userId },
+        data: {
+          plan: Plan.FREE,
+          subscriptionStatus: SubscriptionStatus.CANCELLED,
+          currentPeriodEnd: null,
+          gracePeriodEnd: null,
+          storageLimit: SUBSCRIPTION_PLANS.FREE.storageLimit,
+        },
+      });
+    }
+
+    return { completed: true, accessUntil: null };
+  });
+};
+
+/**
+ * These events do not alter CloudBox entitlement. We validate and explicitly
+ * acknowledge them rather than silently treating them as unknown events.
+ */
+export const processSubscriptionInformationalEvent = async (
+  payload: any,
+  event: "updated" | "paused"
+) => {
+  const entity = payload?.subscription?.entity;
+  if (!entity?.id) {
+    throw new Error(`Invalid subscription.${event} payload`);
+  }
+
+  const subscription = await prisma.subscription.findUnique({
+    where: { razorpaySubscriptionId: entity.id },
+    select: { id: true },
+  });
+  if (!subscription) throw new Error("Subscription not found");
+
+  return { acknowledged: true, entitlementChanged: false };
 };
