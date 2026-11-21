@@ -3,7 +3,8 @@ import { Plan, SubscriptionStatus } from "@prisma/client";
 import { createSubscription } from "../services/subscription.service";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
 import { MAX_SINGLE_UPLOAD_SIZE } from "../config/upload";
-import { cancelRazorpaySubscription, isDefinitiveRazorpayRejection } from "../services/razorpay.service";
+import { cancelRazorpaySubscription } from "../services/razorpay.service";
+import { isDefinitiveRazorpayRejection } from "../utils/razorpay-error";
 import prisma from "../config/prisma";
 
 export const createSubscriptionController = async (
