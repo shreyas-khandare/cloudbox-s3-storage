@@ -592,14 +592,18 @@ export const processSubscriptionCancelledEvent = async (
         },
       });
 
-      await tx.user.update({
-        where: { id: subscription.userId },
-        data: {
+      // The subscription's cycle-end cancellation must not overwrite a
+      // different plan entitlement if another subscription has since become
+      // the user's current paid subscription.
+      await tx.user.updateMany({
+        where: {
+          id: subscription.userId,
           plan: subscription.plan,
+        },
+        data: {
           subscriptionStatus: SubscriptionStatus.ACTIVE,
           currentPeriodEnd: subscription.currentPeriodEnd,
           gracePeriodEnd: null,
-          storageLimit: SUBSCRIPTION_PLANS[subscription.plan].storageLimit,
         },
       });
 
@@ -839,10 +843,19 @@ export const processSubscriptionCompletedEvent = async (payload: any) => {
     throw new Error("Invalid subscription.completed payload");
   }
 
+  const providerPeriodStart = Number.isFinite(entity.current_start)
+    ? new Date(entity.current_start * 1000)
+    : null;
   const providerPeriodEnd = Number.isFinite(entity.current_end)
     ? new Date(entity.current_end * 1000)
     : null;
-  if (providerPeriodEnd && !Number.isFinite(providerPeriodEnd.getTime())) {
+  if (
+    (providerPeriodStart && !Number.isFinite(providerPeriodStart.getTime())) ||
+    (providerPeriodEnd && !Number.isFinite(providerPeriodEnd.getTime())) ||
+    (providerPeriodStart &&
+      providerPeriodEnd &&
+      providerPeriodEnd <= providerPeriodStart)
+  ) {
     throw new Error("Invalid completed subscription period");
   }
 
@@ -860,6 +873,7 @@ export const processSubscriptionCompletedEvent = async (payload: any) => {
       return { ignored: true };
     }
 
+    const periodStart = providerPeriodStart ?? subscription.currentPeriodStart;
     const periodEnd = providerPeriodEnd ?? subscription.currentPeriodEnd;
     const hasPaidTimeRemaining = Boolean(periodEnd && periodEnd > new Date());
 
@@ -882,6 +896,11 @@ export const processSubscriptionCompletedEvent = async (payload: any) => {
             ],
           },
           amount: SUBSCRIPTION_PLANS[subscription.plan].price,
+          // A payment from an earlier billing cycle cannot justify access
+          // through the final period of a completed subscription.
+          paidAt: periodStart && periodEnd
+            ? { gte: periodStart, lte: periodEnd }
+            : { equals: null },
         },
         select: { id: true },
       }),
