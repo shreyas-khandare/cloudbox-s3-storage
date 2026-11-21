@@ -579,6 +579,55 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       assert.equal(updatedUser?.plan, Plan.FREE);
       assert.equal(subscription?.status, SubscriptionStatus.REFUNDED);
     });
+    await t.test("rejects a new captured payment against a fully refunded subscription", async () => {
+      const newPaymentId = `pay_after_refund_${prefix}`;
+      const eventId = await saveWebhook(
+        "subscription.charged",
+        {
+          subscription: {
+            entity: {
+              id: razorpaySubscriptionId,
+              status: "active",
+              plan_id: "plan_test_pro",
+              current_start: periodStart,
+              current_end: periodEnd,
+            },
+          },
+          payment: {
+            entity: {
+              id: newPaymentId,
+              amount: 14900,
+              currency: "INR",
+              status: "captured",
+              created_at: refundProcessedAt + 2,
+            },
+          },
+        },
+        "new-charge-after-refund"
+      );
+
+      await assert.rejects(
+        processRazorpayWebhookEvent(eventId),
+        /cancelled, expired, or refunded subscription/
+      );
+
+      const [newPayment, subscription, updatedUser, webhook] = await Promise.all([
+        prisma.payment.findUnique({
+          where: { razorpayPaymentId: newPaymentId },
+        }),
+        prisma.subscription.findUnique({
+          where: { razorpaySubscriptionId },
+        }),
+        prisma.user.findUnique({ where: { id: user.id } }),
+        prisma.razorpayWebhookEvent.findUnique({ where: { eventId } }),
+      ]);
+
+      assert.equal(newPayment, null);
+      assert.equal(subscription?.status, SubscriptionStatus.REFUNDED);
+      assert.equal(updatedUser?.plan, Plan.FREE);
+      assert.equal(webhook?.status, WebhookStatus.FAILED);
+    });
+
     await t.test("expires a refunded subscription after end-of-period cancellation", async () => {
       const { expireSubscriptions } = await import("./subscription-expiry.service");
 
