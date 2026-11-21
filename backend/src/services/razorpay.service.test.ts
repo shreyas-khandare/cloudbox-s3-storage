@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isDefinitiveRazorpayRejection } from "./razorpay.service";
+import { isDefinitiveRazorpayRejection } from "../utils/razorpay-error";
 
 test("Razorpay cancellation errors: classifies explicit 4xx responses as rejected", () => {
   assert.equal(isDefinitiveRazorpayRejection({ statusCode: 400 }), true);
