@@ -125,6 +125,28 @@ export function PlansPage({ navigate }: Props) {
     return () => window.clearInterval(timer);
   }, [userId, pendingSubscription?.id, pendingSubscription?.status, loadData, refreshUser]);
 
+  // Hosted Razorpay checkout may return the customer to this tab after
+  // authorization. Refresh immediately on focus/visibility instead of
+  // relying only on the bounded polling interval.
+  useEffect(() => {
+    if (!userId) return;
+
+    const refreshOnReturn = () => {
+      if (document.visibilityState !== "visible") return;
+      void Promise.all([loadData(), refreshUser()]).catch(() => {
+        // Keep the last known state visible; the user can still refresh manually.
+      });
+    };
+
+    window.addEventListener("focus", refreshOnReturn);
+    document.addEventListener("visibilitychange", refreshOnReturn);
+
+    return () => {
+      window.removeEventListener("focus", refreshOnReturn);
+      document.removeEventListener("visibilitychange", refreshOnReturn);
+    };
+  }, [userId, loadData, refreshUser]);
+
   const handleChoosePlan = async (plan: Plan) => {
     setError("");
     setNotice("");
