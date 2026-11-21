@@ -282,6 +282,23 @@ export const cancelSubscriptionController = async (
     subscription.currentPeriodEnd !== null &&
     subscription.currentPeriodEnd > now;
 
+  // Persist cycle-end intent before calling Razorpay. Razorpay can emit
+  // subscription.cancelled while the API request is still in flight; the
+  // webhook must already know to preserve the customer's paid access.
+  if (keepAccessUntilPeriodEnd) {
+    try {
+      await prisma.subscription.update({
+        where: { id: subscription.id },
+        data: { cancelAtPeriodEnd: true },
+      });
+    } catch (error) {
+      console.error("[Billing] Failed to persist scheduled cancellation intent:", error);
+      return res.status(503).json({
+        message: "Billing data could not be updated. No cancellation was requested.",
+      });
+    }
+  }
+
   // If a future paid period remains, schedule cancellation for its end.
   // Past-due/halted/refunded subscriptions whose period has ended are
   // cancelled immediately, removing the provider's future billing schedule.
@@ -292,17 +309,36 @@ export const cancelSubscriptionController = async (
     );
   } catch (error) {
     console.error("[Billing] Razorpay rejected cancellation:", error);
+
+    // The provider did not accept the request, so remove the local intent.
+    // If rollback fails, return a distinct error: the local state then needs
+    // reconciliation before the customer retries.
+    if (keepAccessUntilPeriodEnd) {
+      try {
+        await prisma.subscription.updateMany({
+          where: {
+            id: subscription.id,
+            cancelAtPeriodEnd: true,
+          },
+          data: { cancelAtPeriodEnd: false },
+        });
+      } catch (rollbackError) {
+        console.error("[Billing] Failed to roll back scheduled cancellation intent:", rollbackError);
+        return res.status(503).json({
+          message: "Razorpay did not confirm cancellation and CloudBox could not roll back the pending request. Refresh Billing before retrying.",
+        });
+      }
+    }
+
     return res.status(502).json({
-      message: "Razorpay could not cancel the subscription. No local billing changes were made.",
+      message: "Razorpay could not cancel the subscription. No cancellation was scheduled.",
     });
   }
 
   try {
     if (keepAccessUntilPeriodEnd) {
-      await prisma.subscription.update({
-        where: { id: subscription.id },
-        data: { cancelAtPeriodEnd: true },
-      });
+      // The intent was persisted before the provider call to close the
+      // webhook race. No second write is required here.
     } else {
       await prisma.$transaction(async (tx) => {
         await tx.subscription.update({
