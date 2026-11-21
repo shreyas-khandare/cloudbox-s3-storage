@@ -288,6 +288,80 @@ export const processRefundProcessedEvent = async (
     result.razorpaySubscriptionId
   ) {
     await cancelProviderSubscription(result.razorpaySubscriptionId);
+
+    // Provider cancellation is confirmed. Move the subscription out of the
+    // REFUNDED transitional state so the customer can start a fresh checkout.
+    // If this DB transaction fails, the webhook retry re-fetches the provider
+    // state (already cancelled) and safely retries this finalization.
+    await prisma.$transaction(async (tx) => {
+      const subscription = await tx.subscription.findUnique({
+        where: {
+          razorpaySubscriptionId: result.razorpaySubscriptionId!,
+        },
+      });
+
+      if (!subscription || subscription.status !== SubscriptionStatus.REFUNDED) {
+        return;
+      }
+
+      const cancelledAt = new Date();
+
+      await tx.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          status: SubscriptionStatus.CANCELLED,
+          cancelledAt,
+          endDate: cancelledAt,
+          cancelAtPeriodEnd: false,
+          gracePeriodEnd: null,
+        },
+      });
+
+      const anotherEntitledSubscription = await tx.subscription.findFirst({
+        where: {
+          userId: subscription.userId,
+          id: { not: subscription.id },
+          status: {
+            in: [
+              SubscriptionStatus.ACTIVE,
+              SubscriptionStatus.PAST_DUE,
+              SubscriptionStatus.HALTED,
+            ],
+          },
+        },
+        select: {
+          plan: true,
+          status: true,
+          currentPeriodEnd: true,
+          gracePeriodEnd: true,
+        },
+      });
+
+      if (anotherEntitledSubscription) {
+        await tx.user.update({
+          where: { id: subscription.userId },
+          data: {
+            plan: anotherEntitledSubscription.plan,
+            subscriptionStatus: anotherEntitledSubscription.status,
+            currentPeriodEnd: anotherEntitledSubscription.currentPeriodEnd,
+            gracePeriodEnd: anotherEntitledSubscription.gracePeriodEnd,
+            storageLimit:
+              SUBSCRIPTION_PLANS[anotherEntitledSubscription.plan].storageLimit,
+          },
+        });
+      } else {
+        await tx.user.update({
+          where: { id: subscription.userId },
+          data: {
+            plan: Plan.FREE,
+            subscriptionStatus: SubscriptionStatus.CANCELLED,
+            currentPeriodEnd: null,
+            gracePeriodEnd: null,
+            storageLimit: SUBSCRIPTION_PLANS.FREE.storageLimit,
+          },
+        });
+      }
+    });
   }
 
   return {
