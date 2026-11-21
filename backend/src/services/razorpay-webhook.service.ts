@@ -287,8 +287,13 @@ export const processPaymentFailedEvent = async (
     );
 };
 
+type RazorpayWebhookDependencies = {
+  cancelRefundedSubscription?: (subscriptionId: string) => Promise<unknown>;
+};
+
 export const processRazorpayWebhookEvent = async (
-  eventId: string
+  eventId: string,
+  dependencies: RazorpayWebhookDependencies = {}
 ) => {
   const webhookEvent = await prisma.razorpayWebhookEvent.findUnique({
     where: { eventId },
@@ -367,7 +372,10 @@ export const processRazorpayWebhookEvent = async (
         break;
 
       case "refund.processed":
-        await processRefundProcessedEvent(eventPayload);
+        await processRefundProcessedEvent(
+          eventPayload,
+          dependencies.cancelRefundedSubscription
+        );
         break;
 
       case "subscription.cancelled":
