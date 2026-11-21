@@ -585,8 +585,8 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       assert.equal(payment?.status, PaymentStatus.REFUNDED);
       assert.equal(payment?.amountRefunded, 14900);
       assert.equal(updatedUser?.plan, Plan.FREE);
-      assert.equal(updatedUser?.subscriptionStatus, SubscriptionStatus.REFUNDED);
-      assert.equal(subscription?.status, SubscriptionStatus.REFUNDED);
+      assert.equal(updatedUser?.subscriptionStatus, SubscriptionStatus.CANCELLED);
+      assert.equal(subscription?.status, SubscriptionStatus.CANCELLED);
     });
 
     await t.test("does not reactivate a fully refunded payment from a delayed charge event", async () => {
@@ -654,9 +654,23 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       ]);
 
       assert.equal(newPayment, null);
-      assert.equal(subscription?.status, SubscriptionStatus.REFUNDED);
+      assert.equal(subscription?.status, SubscriptionStatus.CANCELLED);
       assert.equal(updatedUser?.plan, Plan.FREE);
       assert.equal(webhook?.status, WebhookStatus.FAILED);
+    });
+
+    await t.test("allows a fresh checkout after the refunded provider subscription is cancelled", async () => {
+      const newSubscriptionId = `sub_after_refund_${prefix}`;
+      const result = await createSubscription(user.id, Plan.BUSINESS, {
+        create: async () => ({
+          id: newSubscriptionId,
+          short_url: `https://rzp.io/i/after-refund-${prefix}`,
+        }),
+        cancel: async () => undefined,
+      });
+
+      assert.equal(result.subscription.status, SubscriptionStatus.CREATED);
+      assert.equal(result.subscription.razorpaySubscriptionId, newSubscriptionId);
     });
 
     await t.test("expires a refunded subscription after end-of-period cancellation", async () => {
