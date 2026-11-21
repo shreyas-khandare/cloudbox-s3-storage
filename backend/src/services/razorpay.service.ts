@@ -29,4 +29,25 @@ export const cancelRazorpaySubscription = async (
   return razorpay.subscriptions.cancel(subscriptionId, cancelAtCycleEnd);
 };
 
+/**
+ * Ensure a fully refunded subscription cannot generate future charges.
+ * Fetch first because Razorpay rejects cancellation requests for subscriptions
+ * that are already cancelled, completed, or expired.
+ */
+export const ensureRazorpaySubscriptionCancelled = async (
+  subscriptionId: string
+) => {
+  const subscription = await razorpay.subscriptions.fetch(subscriptionId);
+
+  if (
+    subscription.status === "cancelled" ||
+    subscription.status === "completed" ||
+    subscription.status === "expired"
+  ) {
+    return subscription;
+  }
+
+  return razorpay.subscriptions.cancel(subscriptionId, false);
+};
+
 export default razorpay;
