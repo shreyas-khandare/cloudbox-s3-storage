@@ -276,7 +276,7 @@ export const processRefundProcessedEvent = async (
       amountRefunded: updatedPayment.amountRefunded,
       entitlementRevoked,
       shouldCancelProviderSubscription,
-      razorpaySubscriptionId: subscription.razorpaySubscriptionId,
+      razorpaySubscriptionId: payment.subscription.razorpaySubscriptionId,
     };
   });
 
