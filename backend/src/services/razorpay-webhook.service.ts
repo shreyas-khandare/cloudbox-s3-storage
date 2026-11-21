@@ -881,30 +881,30 @@ export const processSubscriptionCompletedEvent = async (payload: any) => {
     // that CloudBox received a successful charge. Preserve an existing
     // entitlement only when a captured (or partially refunded) invoice is
     // already recorded locally. Never grant a plan from this event alone.
-    const [user, paidPayment] = await Promise.all([
-      tx.user.findUnique({
-        where: { id: subscription.userId },
-        select: { plan: true },
-      }),
-      tx.payment.findFirst({
-        where: {
-          subscriptionId: subscription.id,
-          status: {
-            in: [
-              PaymentStatus.CAPTURED,
-              PaymentStatus.PARTIALLY_REFUNDED,
-            ],
+    const user = await tx.user.findUnique({
+      where: { id: subscription.userId },
+      select: { plan: true },
+    });
+    // Without known period boundaries, there is no safe way to associate a
+    // historical payment with the final completed billing cycle.
+    const paidPayment = periodStart && periodEnd
+      ? await tx.payment.findFirst({
+          where: {
+            subscriptionId: subscription.id,
+            status: {
+              in: [
+                PaymentStatus.CAPTURED,
+                PaymentStatus.PARTIALLY_REFUNDED,
+              ],
+            },
+            amount: SUBSCRIPTION_PLANS[subscription.plan].price,
+            // A payment from an earlier billing cycle cannot justify access
+            // through the final period of a completed subscription.
+            paidAt: { gte: periodStart, lte: periodEnd },
           },
-          amount: SUBSCRIPTION_PLANS[subscription.plan].price,
-          // A payment from an earlier billing cycle cannot justify access
-          // through the final period of a completed subscription.
-          paidAt: periodStart && periodEnd
-            ? { gte: periodStart, lte: periodEnd }
-            : { equals: null },
-        },
-        select: { id: true },
-      }),
-    ]);
+          select: { id: true },
+        })
+      : null;
 
     const hasRecordedEntitlement =
       user?.plan === subscription.plan && Boolean(paidPayment);
