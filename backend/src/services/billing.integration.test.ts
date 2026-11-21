@@ -297,8 +297,7 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
 
       const pending = await prisma.subscription.findUnique({
         where: { razorpaySubscriptionId },
-      });
-      const pendingUser = await prisma.user.findUnique({
+      });      const pendingUser = await prisma.user.findUnique({
         where: { id: user.id },
       });
       assert.equal(pending?.status, SubscriptionStatus.PAST_DUE);
@@ -597,8 +596,7 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
               id: `rfnd_partial_${prefix}`,
               payment_id: razorpayPaymentId,
               amount: 5000,
-              currency: "INR",
-              status: "processed",
+              currency: "INR",              status: "processed",
               created_at: refundProcessedAt,
             },
           },
@@ -796,10 +794,19 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
     });
 
     await t.test("preserves paid access when Razorpay confirms a scheduled cycle-end cancellation", async () => {
+      const scheduledUser = await prisma.user.create({
+        data: {
+          name: "CloudBox Scheduled Cancellation Test",
+          email: `scheduled-cancel-${prefix}@example.test`,
+          emailVerified: true,
+        },
+        select: { id: true },
+      });
       const newSubscriptionId = `sub_scheduled_cancel_${prefix}`;
       const scheduledEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-      const created = await createSubscription(user.id, Plan.BUSINESS, {
+      try {
+      const created = await createSubscription(scheduledUser.id, Plan.BUSINESS, {
         create: async () => ({
           id: newSubscriptionId,
           short_url: `https://rzp.io/i/scheduled-cancel-${prefix}`,
@@ -817,7 +824,7 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
         },
       });
       await prisma.user.update({
-        where: { id: user.id },
+        where: { id: scheduledUser.id },
         data: {
           plan: Plan.BUSINESS,
           subscriptionStatus: SubscriptionStatus.ACTIVE,
@@ -849,7 +856,7 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
 
       const [subscription, updatedUser] = await Promise.all([
         prisma.subscription.findUnique({ where: { id: created.subscription.id } }),
-        prisma.user.findUnique({ where: { id: user.id } }),
+        prisma.user.findUnique({ where: { id: scheduledUser.id } }),
       ]);
 
       assert.equal(subscription?.status, SubscriptionStatus.ACTIVE);
@@ -857,32 +864,53 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       assert.equal(updatedUser?.plan, Plan.BUSINESS);
       assert.equal(updatedUser?.subscriptionStatus, SubscriptionStatus.ACTIVE);
       assert.equal(updatedUser?.currentPeriodEnd?.getTime(), scheduledEnd.getTime());
+      } finally {
+        await prisma.subscription.deleteMany({ where: { userId: scheduledUser.id } });
+        await prisma.user.delete({ where: { id: scheduledUser.id } });
+      }
     });
 
     await t.test("expires a refunded subscription after end-of-period cancellation", async () => {
       const { expireSubscriptions } = await import("./subscription-expiry.service");
-
-      await prisma.subscription.update({
-        where: { razorpaySubscriptionId },
+      const expiryUser = await prisma.user.create({
         data: {
-          status: SubscriptionStatus.REFUNDED,
-          cancelAtPeriodEnd: true,
-          currentPeriodEnd: new Date(Date.now() - 1000),
+          name: "CloudBox Refunded Expiry Test",
+          email: `refunded-expiry-${prefix}@example.test`,
+          emailVerified: true,
         },
+        select: { id: true },
       });
+      const expiredRefundedSubscriptionId = `sub_refunded_expiry_${prefix}`;
 
-      const processed = await expireSubscriptions({ userId: user.id });
-      assert.equal(processed, 1);
+      try {
+        await prisma.subscription.create({
+          data: {
+            userId: expiryUser.id,
+            plan: Plan.PRO,
+            razorpayPlanId: "plan_test_pro",
+            razorpaySubscriptionId: expiredRefundedSubscriptionId,
+            status: SubscriptionStatus.REFUNDED,
+            cancelAtPeriodEnd: true,
+            currentPeriodEnd: new Date(Date.now() - 1000),
+          },
+        });
 
-      const [subscription, updatedUser] = await Promise.all([
-        prisma.subscription.findUnique({
-          where: { razorpaySubscriptionId },
-        }),
-        prisma.user.findUnique({ where: { id: user.id } }),
-      ]);
+        const processed = await expireSubscriptions({ userId: expiryUser.id });
+        assert.equal(processed, 1);
 
-      assert.equal(subscription?.status, SubscriptionStatus.CANCELLED);
-      assert.equal(updatedUser?.plan, Plan.FREE);
+        const [subscription, updatedUser] = await Promise.all([
+          prisma.subscription.findUnique({
+            where: { razorpaySubscriptionId: expiredRefundedSubscriptionId },
+          }),
+          prisma.user.findUnique({ where: { id: expiryUser.id } }),
+        ]);
+
+        assert.equal(subscription?.status, SubscriptionStatus.CANCELLED);
+        assert.equal(updatedUser?.plan, Plan.FREE);
+      } finally {
+        await prisma.subscription.deleteMany({ where: { userId: expiryUser.id } });
+        await prisma.user.delete({ where: { id: expiryUser.id } });
+      }
     });
 
     await t.test("expires HALTED subscriptions when the grace period ends", async () => {
@@ -897,8 +925,7 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       const haltedSubscriptionId = `sub_phase1_halted_${prefix}`;
 
       try {
-        await prisma.subscription.create({
-          data: {
+        await prisma.subscription.create({          data: {
             userId: haltedUser.id,
             plan: Plan.BUSINESS,
             razorpayPlanId: "plan_test_business",
