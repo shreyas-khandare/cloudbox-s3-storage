@@ -274,7 +274,11 @@ export const cancelSubscriptionController = async (
   }
 
   const now = new Date();
+  // A fully refunded subscription must be cancelled immediately even
+  // when its previous billing period has a future end date. Scheduling
+  // cancellation would leave the provider subscription capable of charging.
   const keepAccessUntilPeriodEnd =
+    subscription.status !== SubscriptionStatus.REFUNDED &&
     subscription.currentPeriodEnd !== null &&
     subscription.currentPeriodEnd > now;
 
