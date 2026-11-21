@@ -556,6 +556,37 @@ export const processSubscriptionCancelledEvent = async (
       return { duplicate: true };
     }
 
+    // A cycle-end cancellation stops future renewals but does not remove
+    // already-paid access before the current billing period expires.
+    const preservePaidAccessUntilPeriodEnd =
+      subscription.cancelAtPeriodEnd &&
+      subscription.currentPeriodEnd !== null &&
+      subscription.currentPeriodEnd > new Date();
+
+    if (preservePaidAccessUntilPeriodEnd) {
+      await tx.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          status: SubscriptionStatus.ACTIVE,
+          cancelAtPeriodEnd: true,
+          gracePeriodEnd: null,
+        },
+      });
+
+      await tx.user.update({
+        where: { id: subscription.userId },
+        data: {
+          plan: subscription.plan,
+          subscriptionStatus: SubscriptionStatus.ACTIVE,
+          currentPeriodEnd: subscription.currentPeriodEnd,
+          gracePeriodEnd: null,
+          storageLimit: SUBSCRIPTION_PLANS[subscription.plan].storageLimit,
+        },
+      });
+
+      return { duplicate: false, cancellationScheduled: true };
+    }
+
     await tx.subscription.update({
       where: { id: subscription.id },
       data: {
