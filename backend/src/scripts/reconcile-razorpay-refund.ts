@@ -53,18 +53,36 @@ async function main() {
   // not create a refund, charge a customer, or change provider subscription state.
   const refund = await razorpayGet(`/refunds/${encodeURIComponent(refundId)}`);
 
-  if (
-    refund.id !== refundId ||
-    refund.status !== "processed" ||
-    refund.payment_id !== expectedPaymentId ||
-    !Number.isInteger(refund.amount) ||
-    refund.amount <= 0 ||
-    refund.currency !== "INR" ||
-    typeof refund.created_at !== "number" ||
-    !Number.isFinite(refund.created_at)
-  ) {
+  const refundChecks = {
+    returnedRefundId: refund.id,
+    refundIdMatches: refund.id === refundId,
+    returnedStatus: refund.status,
+    statusIsProcessed: refund.status === "processed",
+    returnedPaymentId: refund.payment_id,
+    paymentIdMatches: refund.payment_id === expectedPaymentId,
+    returnedAmount: refund.amount,
+    amountIsPositiveInteger:
+      Number.isInteger(refund.amount) && refund.amount > 0,
+    returnedCurrency: refund.currency,
+    currencyIsINR: refund.currency === "INR",
+    returnedCreatedAt: refund.created_at,
+    createdAtIsValid:
+      typeof refund.created_at === "number" &&
+      Number.isFinite(refund.created_at),
+  };
+
+  const refundMatches =
+    refundChecks.refundIdMatches &&
+    refundChecks.statusIsProcessed &&
+    refundChecks.paymentIdMatches &&
+    refundChecks.amountIsPositiveInteger &&
+    refundChecks.currencyIsINR &&
+    refundChecks.createdAtIsValid;
+
+  if (!refundMatches) {
+    console.error("Razorpay refund validation diagnostics:", refundChecks);
     throw new Error(
-      "Razorpay refund details do not match the requested processed refund, payment ID, amount, currency, or timestamp."
+      "The refund was fetched from Razorpay, but one or more returned fields did not match. Use the diagnostics above; no CloudBox records were changed."
     );
   }
 
