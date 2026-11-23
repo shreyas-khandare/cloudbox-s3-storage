@@ -11,7 +11,8 @@
     "reprocess:razorpay-webhooks": "tsx src/scripts/reprocess-razorpay-webhooks.ts",
     "test:integration": "tsx --test src/services/billing.integration.test.ts",
     "reprocess:razorpay-pending": "tsx src/scripts/reprocess-razorpay-pending.ts",
-    "reconcile:razorpay-refund": "tsx src/scripts/reconcile-razorpay-refund.ts"
+    "reconcile:razorpay-refund": "tsx src/scripts/reconcile-razorpay-refund.ts",
+    "test:duplicate-webhook": "tsx src/scripts/test-duplicate-razorpay-webhook.ts"
   },
   "keywords": [],
   "author": "",
