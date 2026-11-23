@@ -4,6 +4,7 @@ import {
     SubscriptionStatus,
     WebhookStatus,
 } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 import prisma from "../config/prisma";
 import { processRefundProcessedEvent } from "./razorpay-refund.service";
