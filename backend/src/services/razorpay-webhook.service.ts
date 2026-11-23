@@ -758,7 +758,7 @@ export const processSubscriptionPendingEvent = async (
     await tx.user.updateMany({
       where: {
         id: subscription.userId,
-        plan: subscription.plan,
+        OR: [{ plan: subscription.plan }, { plan: Plan.FREE }],
       },
       data: {
         subscriptionStatus: SubscriptionStatus.PAST_DUE,
@@ -828,7 +828,7 @@ export const processSubscriptionHaltedEvent = async (
     await tx.user.updateMany({
       where: {
         id: subscription.userId,
-        plan: subscription.plan,
+        OR: [{ plan: subscription.plan }, { plan: Plan.FREE }],
       },
       data: {
         subscriptionStatus: SubscriptionStatus.HALTED,
