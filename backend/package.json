@@ -10,7 +10,8 @@
     "test": "tsx --test src/services/razorpay.service.test.ts src/config/subscription-plans.test.ts src/utils/razorpay-webhook-signature.test.ts src/utils/razorpay-subscription-signature.test.ts src/middlewares/error.middleware.test.ts src/utils/dependency-error.test.ts src/utils/razorpay-webhook-payload.test.ts",
     "reprocess:razorpay-webhooks": "tsx src/scripts/reprocess-razorpay-webhooks.ts",
     "test:integration": "tsx --test src/services/billing.integration.test.ts",
-    "reprocess:razorpay-pending": "tsx src/scripts/reprocess-razorpay-pending.ts"
+    "reprocess:razorpay-pending": "tsx src/scripts/reprocess-razorpay-pending.ts",
+    "reconcile:razorpay-refund": "tsx src/scripts/reconcile-razorpay-refund.ts"
   },
   "keywords": [],
   "author": "",
