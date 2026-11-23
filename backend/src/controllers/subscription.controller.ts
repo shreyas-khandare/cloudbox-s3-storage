@@ -1,4 +1,6 @@
 import { Request, Response, NextFunction } from "express";
+import { verifyRazorpaySubscriptionCheckoutSignature } from "../utils/razorpay-subscription-signature";
+import { env } from "../config/env";
 import { Plan, SubscriptionStatus } from "@prisma/client";
 import { createSubscription } from "../services/subscription.service";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
@@ -112,6 +114,93 @@ export const createSubscriptionController = async (
   }
 };
 
+
+export const verifySubscriptionCheckoutController = async (
+  req: Request,
+  res: Response
+) => {
+  const {
+    razorpay_payment_id: paymentId,
+    razorpay_subscription_id: checkoutSubscriptionId,
+    razorpay_signature: signature,
+  } = req.body ?? {};
+
+  if (
+    typeof paymentId !== "string" ||
+    !paymentId.trim() ||
+    typeof checkoutSubscriptionId !== "string" ||
+    !checkoutSubscriptionId.trim() ||
+    typeof signature !== "string"
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid Razorpay checkout response",
+    });
+  }
+
+  try {
+    // Resolve the subscription from CloudBox's database for the signed-in user.
+    // Never trust a subscription ID supplied by the browser without this lookup.
+    const subscription = await prisma.subscription.findFirst({
+      where: {
+        userId: req.user!.id,
+        razorpaySubscriptionId: checkoutSubscriptionId,
+      },
+      select: {
+        id: true,
+        razorpaySubscriptionId: true,
+        status: true,
+      },
+    });
+
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: "Subscription does not belong to this account",
+      });
+    }
+
+    if (
+      subscription.status === SubscriptionStatus.CANCELLED ||
+      subscription.status === SubscriptionStatus.EXPIRED ||
+      subscription.status === SubscriptionStatus.REFUNDED
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "This subscription is no longer eligible for checkout confirmation",
+      });
+    }
+
+    const signatureValid = verifyRazorpaySubscriptionCheckoutSignature(
+      paymentId,
+      subscription.razorpaySubscriptionId,
+      signature,
+      env.RAZORPAY.KEY_SECRET
+    );
+
+    if (!signatureValid) {
+      return res.status(400).json({
+        success: false,
+        message: "Razorpay checkout signature verification failed",
+      });
+    }
+
+    // This endpoint confirms the browser checkout response only. Paid plan
+    // entitlements are still granted exclusively by the verified webhook.
+    return res.status(200).json({
+      success: true,
+      verified: true,
+      message: "Checkout response verified. Waiting for Razorpay webhook confirmation.",
+    });
+  } catch (error) {
+    console.error("[Billing] Subscription checkout verification failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Unable to verify the Razorpay checkout response",
+    });
+  }
+};
+
 export const getSubscriptionPlansController = (
   _req: Request,
   res: Response
@@ -161,6 +250,7 @@ export const getMySubscriptionController = async (
             currentPeriodEnd: true,
             cancelAtPeriodEnd: true,
             checkoutUrl: true,
+            razorpaySubscriptionId: true,
             createdAt: true,
           },
         },
@@ -181,6 +271,7 @@ export const getMySubscriptionController = async (
         storageUsed: user.storageUsed.toString(),
         storageLimit: user.storageLimit.toString(),
         currentSubscription: user.subscriptions[0] ?? null,
+        razorpayKeyId: env.RAZORPAY.KEY_ID,
         subscriptions: undefined,
       },
     });
