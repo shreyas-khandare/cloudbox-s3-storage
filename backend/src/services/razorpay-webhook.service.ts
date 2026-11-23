@@ -386,11 +386,11 @@ export const processRazorpayWebhookEvent = async (
         break;
 
       case "subscription.pending":
-        await processSubscriptionPendingEvent(eventPayload);
+        await processSubscriptionPendingEvent(eventPayload, getWebhookOccurredAt(webhookEvent.payload));
         break;
 
       case "subscription.halted":
-        await processSubscriptionHaltedEvent(eventPayload);
+        await processSubscriptionHaltedEvent(eventPayload, getWebhookOccurredAt(webhookEvent.payload));
         break;
 
       case "subscription.resumed":
@@ -653,12 +653,53 @@ export const processSubscriptionCancelledEvent = async (
 };
 
 
+const getWebhookOccurredAt = (storedPayload: Prisma.JsonValue): Date | undefined => {
+  if (
+    typeof storedPayload !== "object" ||
+    storedPayload === null ||
+    Array.isArray(storedPayload)
+  ) {
+    return undefined;
+  }
+
+  const createdAt = (storedPayload as Prisma.JsonObject).created_at;
+  return typeof createdAt === "number" && Number.isFinite(createdAt) && createdAt > 0
+    ? new Date(createdAt * 1000)
+    : undefined;
+};
+
+/**
+ * Protect a newer successful charge from an older failure webhook delivered
+ * out of order. Razorpay's subscription webhook envelope includes created_at.
+ */
+const hasCapturedPaymentAfterWebhook = async (
+  tx: Prisma.TransactionClient,
+  subscriptionId: string,
+  webhookOccurredAt?: Date
+): Promise<boolean> => {
+  if (!webhookOccurredAt) return false;
+
+  const newerCapturedPayment = await tx.payment.findFirst({
+    where: {
+      subscriptionId,
+      status: {
+        in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED],
+      },
+      paidAt: { gt: webhookOccurredAt },
+    },
+    select: { id: true },
+  });
+
+  return Boolean(newerCapturedPayment);
+};
+
 export const processSubscriptionPendingEvent = async (
-  payload: any
+  payload: any,
+  webhookOccurredAt?: Date
 ) => {
   const razorpaySubscription = payload?.subscription?.entity;
 
-  if (!razorpaySubscription?.id) {
+  if (!razorpaySubscription?.id || razorpaySubscription.status !== "pending") {
     throw new Error("Invalid subscription.pending payload");
   }
 
@@ -676,11 +717,24 @@ export const processSubscriptionPendingEvent = async (
     if (
       subscription.status === SubscriptionStatus.CANCELLED ||
       subscription.status === SubscriptionStatus.EXPIRED ||
-      subscription.status === SubscriptionStatus.ACTIVE ||
       subscription.status === SubscriptionStatus.HALTED ||
-      subscription.status === SubscriptionStatus.REFUNDED
+      subscription.status === SubscriptionStatus.REFUNDED ||
+      subscription.status === SubscriptionStatus.PAST_DUE
     ) {
       return { ignored: true };
+    }
+
+    // A failed renewal legitimately moves an ACTIVE subscription to PAST_DUE.
+    // Ignore only a stale pending webhook that arrived after a newer captured
+    // payment already restored the subscription.
+    if (
+      await hasCapturedPaymentAfterWebhook(
+        tx,
+        subscription.id,
+        webhookOccurredAt
+      )
+    ) {
+      return { ignored: true, stale: true };
     }
 
     const gracePeriodEnd =
@@ -698,8 +752,13 @@ export const processSubscriptionPendingEvent = async (
       },
     });
 
-    await tx.user.update({
-      where: { id: subscription.userId },
+    // Do not replace an unrelated plan if the user's current entitlement has
+    // since moved to another subscription.
+    await tx.user.updateMany({
+      where: {
+        id: subscription.userId,
+        plan: subscription.plan,
+      },
       data: {
         subscriptionStatus: SubscriptionStatus.PAST_DUE,
         gracePeriodEnd,
@@ -711,11 +770,12 @@ export const processSubscriptionPendingEvent = async (
 };
 
 export const processSubscriptionHaltedEvent = async (
-  payload: any
+  payload: any,
+  webhookOccurredAt?: Date
 ) => {
   const razorpaySubscription = payload?.subscription?.entity;
 
-  if (!razorpaySubscription?.id) {
+  if (!razorpaySubscription?.id || razorpaySubscription.status !== "halted") {
     throw new Error("Invalid subscription.halted payload");
   }
 
@@ -733,10 +793,20 @@ export const processSubscriptionHaltedEvent = async (
     if (
       subscription.status === SubscriptionStatus.CANCELLED ||
       subscription.status === SubscriptionStatus.EXPIRED ||
-      subscription.status === SubscriptionStatus.ACTIVE ||
-      subscription.status === SubscriptionStatus.REFUNDED
+      subscription.status === SubscriptionStatus.REFUNDED ||
+      subscription.status === SubscriptionStatus.HALTED
     ) {
       return { ignored: true };
+    }
+
+    if (
+      await hasCapturedPaymentAfterWebhook(
+        tx,
+        subscription.id,
+        webhookOccurredAt
+      )
+    ) {
+      return { ignored: true, stale: true };
     }
 
     const gracePeriodEnd =
@@ -754,8 +824,11 @@ export const processSubscriptionHaltedEvent = async (
       },
     });
 
-    await tx.user.update({
-      where: { id: subscription.userId },
+    await tx.user.updateMany({
+      where: {
+        id: subscription.userId,
+        plan: subscription.plan,
+      },
       data: {
         subscriptionStatus: SubscriptionStatus.HALTED,
         gracePeriodEnd,
