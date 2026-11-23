@@ -1,6 +1,6 @@
 import "../config/env";
 import { createHmac } from "node:crypto";
-import { PaymentStatus, SubscriptionStatus, WebhookStatus } from "@prisma/client";
+import { WebhookStatus } from "@prisma/client";
 import prisma from "../config/prisma";
 import { env } from "../config/env";
 
