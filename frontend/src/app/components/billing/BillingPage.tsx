@@ -148,6 +148,9 @@ export function BillingPage({ navigate }: Props) {
   };
 
   const subscription = overview?.currentSubscription;
+  const isTerminalSubscription = ["CANCELLED", "EXPIRED", "REFUNDED"].includes(
+    subscription?.status ?? overview?.subscriptionStatus ?? ""
+  );
   const canCancel = Boolean(
     subscription &&
     ["ACTIVE", "PAST_DUE", "HALTED", "REFUNDED"].includes(subscription.status) &&
@@ -249,10 +252,12 @@ export function BillingPage({ navigate }: Props) {
                   </div>
                   <span className="rounded-full bg-[#F2F1FF] px-3 py-1.5 text-xs font-bold text-[#514BFF]">{subscription?.status ?? overview?.subscriptionStatus ?? "FREE"}</span>
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="rounded-2xl bg-[#F7F7FF] p-4"><p className="text-xs text-[#8585A0]">Current period ends</p><p className="mt-1 font-semibold text-[#1A1A2E]">{formatDate(subscription?.currentPeriodEnd ?? overview?.currentPeriodEnd)}</p></div>
-                  <div className="rounded-2xl bg-[#F7F7FF] p-4"><p className="text-xs text-[#8585A0]">Grace period ends</p><p className="mt-1 font-semibold text-[#1A1A2E]">{formatDate(overview?.gracePeriodEnd)}</p></div>
-                </div>
+                {!isTerminalSubscription && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="rounded-2xl bg-[#F7F7FF] p-4"><p className="text-xs text-[#8585A0]">Current period ends</p><p className="mt-1 font-semibold text-[#1A1A2E]">{formatDate(subscription?.currentPeriodEnd ?? overview?.currentPeriodEnd)}</p></div>
+                    <div className="rounded-2xl bg-[#F7F7FF] p-4"><p className="text-xs text-[#8585A0]">Grace period ends</p><p className="mt-1 font-semibold text-[#1A1A2E]">{formatDate(overview?.gracePeriodEnd)}</p></div>
+                  </div>
+                )}
                 {subscription?.cancelAtPeriodEnd && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Cancellation is scheduled. Your paid plan remains available until {formatDate(subscription.currentPeriodEnd)}.</p>}
                 {subscription?.status === "CREATED" && (
                   <div className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
