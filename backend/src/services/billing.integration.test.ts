@@ -87,6 +87,7 @@ const envelope = (
 ): Prisma.InputJsonObject => ({
   entity: "event",
   event,
+  created_at: Math.floor(Date.now() / 1000),
   payload: payload as unknown as Prisma.InputJsonObject,
 });
 
@@ -572,6 +573,38 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       assert.equal(payments, 1);
     });
 
+    await t.test("moves an ACTIVE subscription to PAST_DUE when Razorpay reports a pending renewal", async () => {
+      const eventId = await saveWebhook(
+        "subscription.pending",
+        {
+          subscription: {
+            entity: {
+              id: razorpaySubscriptionId,
+              status: "pending",
+            },
+          },
+        },
+        "pending-after-active-charge"
+      );
+
+      await processRazorpayWebhookEvent(eventId);
+
+      const [subscription, updatedUser, webhook] = await Promise.all([
+        prisma.subscription.findUnique({
+          where: { razorpaySubscriptionId },
+        }),
+        prisma.user.findUnique({ where: { id: user.id } }),
+        prisma.razorpayWebhookEvent.findUnique({ where: { eventId } }),
+      ]);
+
+      assert.equal(subscription?.status, SubscriptionStatus.PAST_DUE);
+      assert.ok(subscription?.gracePeriodEnd && subscription.gracePeriodEnd > new Date());
+      assert.equal(updatedUser?.plan, Plan.PRO);
+      assert.equal(updatedUser?.subscriptionStatus, SubscriptionStatus.PAST_DUE);
+      assert.equal(updatedUser?.gracePeriodEnd?.getTime(), subscription?.gracePeriodEnd?.getTime());
+      assert.equal(webhook?.status, WebhookStatus.PROCESSED);
+    });
+
     await t.test("does not let a delayed payment.failed event overwrite a captured payment", async () => {
       const eventId = await saveWebhook(
         "payment.failed",
@@ -599,10 +632,13 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
         where: { razorpaySubscriptionId },
       });
       assert.equal(payment?.status, PaymentStatus.CAPTURED);
-      assert.equal(subscription?.status, SubscriptionStatus.ACTIVE);
+      // The legitimate subscription.pending transition already moved the
+      // subscription to PAST_DUE; a late duplicate payment.failed must not
+      // overwrite the captured payment or reverse that separate state change.
+      assert.equal(subscription?.status, SubscriptionStatus.PAST_DUE);
     });
 
-    await t.test("a new failed renewal moves an active subscription into its grace period", async () => {
+    await t.test("a new failed renewal preserves the existing grace period", async () => {
       const eventId = await saveWebhook(
         "payment.failed",
         {
