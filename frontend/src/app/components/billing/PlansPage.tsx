@@ -3,6 +3,10 @@ import { ArrowLeft, Check, CreditCard, ShieldCheck, Sparkles, LoaderCircle, Refr
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
 import { api } from "../../../services/api";
+import {
+  loadRazorpayCheckout,
+  openRazorpaySubscriptionCheckout,
+} from "../../../services/razorpay-checkout";
 import { getApiErrorMessage } from "../../../services/api-error";
 import type { Page } from "../../App";
 
@@ -26,6 +30,7 @@ type Subscription = {
   currentPeriodEnd?: string | null;
   cancelAtPeriodEnd?: boolean;
   checkoutUrl?: string | null;
+  razorpaySubscriptionId?: string | null;
   createdAt?: string;
 };
 
@@ -35,6 +40,7 @@ type SubscriptionOverview = {
   currentPeriodEnd?: string | null;
   gracePeriodEnd?: string | null;
   currentSubscription: Subscription | null;
+  razorpayKeyId?: string;
 };
 
 interface Props {
@@ -147,6 +153,59 @@ export function PlansPage({ navigate }: Props) {
     };
   }, [userId, loadData, refreshUser]);
 
+  const startSubscriptionCheckout = async (
+    subscriptionId: string,
+    keyId: string,
+    planId: PlanId
+  ) => {
+    await loadRazorpayCheckout();
+
+    openRazorpaySubscriptionCheckout(
+      {
+        key: keyId,
+        subscription_id: subscriptionId,
+        name: "CloudBox",
+        description: `CloudBox ${planId} monthly subscription`,
+        prefill: {
+          name: user?.name,
+          email: user?.email,
+        },
+        notes: {
+          application: "CloudBox",
+          plan: planId,
+        },
+        theme: { color: "#514BFF" },
+        handler: (checkoutResponse) => {
+          if (checkoutResponse.razorpay_subscription_id !== subscriptionId) {
+            setError("Razorpay returned a response for a different subscription. Please contact support before retrying.");
+            return;
+          }
+
+          void api.post("/subscriptions/verify-checkout", checkoutResponse)
+            .then(() => {
+              routerNavigate(`/dashboard?billing=processing&plan=${planId}`);
+            })
+            .catch(async (verificationError) => {
+              setError(
+                `${getApiErrorMessage(verificationError, "Unable to verify the Razorpay checkout response.")} Do not pay again. Refresh Billing and check the Razorpay webhook status.`
+              );
+              await Promise.all([loadData(), refreshUser()]).catch(() => undefined);
+            });
+        },
+        modal: {
+          ondismiss: () => {
+            setNotice("Checkout was closed. Your subscription remains pending; you can resume checkout from Billing.");
+            void Promise.all([loadData(), refreshUser()]).catch(() => undefined);
+          },
+        },
+      },
+      (message) => {
+        setError(message);
+        void Promise.all([loadData(), refreshUser()]).catch(() => undefined);
+      }
+    );
+  };
+
   const handleChoosePlan = async (plan: Plan) => {
     setError("");
     setNotice("");
@@ -170,12 +229,20 @@ export function PlansPage({ navigate }: Props) {
     setActionPlan(plan.id);
 
     try {
+      // Load Checkout before creating the provider subscription so a blocked
+      // or unavailable SDK does not leave an orphaned pending subscription.
+      await loadRazorpayCheckout();
       const response = await api.post("/subscriptions", { plan: plan.id });
       const result = response.data?.data;
-      const url = result?.razorpay?.shortUrl;
+      const subscriptionId = result?.razorpay?.id;
+      const keyId = result?.razorpay?.keyId;
 
-      if (typeof url !== "string" || !url.startsWith("https://")) {
-        throw new Error("Razorpay did not return a valid hosted checkout URL.");
+      if (
+        typeof subscriptionId !== "string" ||
+        typeof keyId !== "string" ||
+        !keyId.startsWith("rzp_")
+      ) {
+        throw new Error("CloudBox could not prepare secure Razorpay Checkout.");
       }
 
       setOverview((current) => ({
@@ -183,13 +250,19 @@ export function PlansPage({ navigate }: Props) {
         subscriptionStatus: "CREATED",
         currentPeriodEnd: current?.currentPeriodEnd ?? null,
         gracePeriodEnd: current?.gracePeriodEnd ?? null,
-        currentSubscription: result.subscription,
+        razorpayKeyId: keyId,
+        currentSubscription: {
+          ...result.subscription,
+          razorpaySubscriptionId: subscriptionId,
+        },
       }));
 
-      // Navigate in the same tab so the hosted checkout is not blocked as a popup.
-      window.location.assign(url);
+      await startSubscriptionCheckout(subscriptionId, keyId, plan.id);
     } catch (requestError) {
-      setError(getApiErrorMessage(requestError, "Unable to complete the plan request."));
+      setError(getApiErrorMessage(requestError, "Unable to start Razorpay Checkout."));
+      // The subscription may already exist if the provider accepted creation.
+      // Refresh so the user can resume it instead of accidentally creating another.
+      await loadData().catch(() => undefined);
     } finally {
       setActionPlan(null);
     }
@@ -263,14 +336,22 @@ export function PlansPage({ navigate }: Props) {
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
-              {pendingSubscription.status === "CREATED" && pendingSubscription.checkoutUrl && (
-                <button
-                  onClick={() => window.location.assign(pendingSubscription.checkoutUrl!)}
-                  className="inline-flex items-center justify-center rounded-xl bg-amber-900 px-4 py-2 text-sm font-semibold text-white"
-                >
-                  Resume checkout
-                </button>
-              )}
+              {pendingSubscription.status === "CREATED" &&
+                pendingSubscription.razorpaySubscriptionId &&
+                overview?.razorpayKeyId && (
+                  <button
+                    onClick={() => void startSubscriptionCheckout(
+                      pendingSubscription.razorpaySubscriptionId!,
+                      overview.razorpayKeyId!,
+                      pendingSubscription.plan
+                    ).catch((resumeError) => setError(
+                      getApiErrorMessage(resumeError, "Unable to resume Razorpay Checkout.")
+                    ))}
+                    className="inline-flex items-center justify-center rounded-xl bg-amber-900 px-4 py-2 text-sm font-semibold text-white"
+                  >
+                    Resume checkout
+                  </button>
+                )}
               {pendingSubscription.status === "REFUNDED" && (
                 <button onClick={() => navigate("billing")} className="inline-flex items-center justify-center rounded-xl border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900">
                   Manage billing
