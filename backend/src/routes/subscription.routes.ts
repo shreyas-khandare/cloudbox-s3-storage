@@ -6,6 +6,7 @@ import {
   getMySubscriptionController,
   getPaymentHistoryController,
   cancelSubscriptionController,
+  verifySubscriptionCheckoutController,
 } from "../controllers/subscription.controller";
 
 const router = Router();
@@ -16,6 +17,7 @@ router.use(protect);
 
 router.get("/me", getMySubscriptionController);
 router.get("/payments", getPaymentHistoryController);
+router.post("/verify-checkout", verifySubscriptionCheckoutController);
 router.post("/", createSubscriptionController);
 router.post("/cancel", cancelSubscriptionController);
 
