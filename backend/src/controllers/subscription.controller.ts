@@ -6,6 +6,7 @@ import { createSubscription } from "../services/subscription.service";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
 import { MAX_SINGLE_UPLOAD_SIZE } from "../config/upload";
 import { requestRazorpayCancellation } from "../services/subscription-cancellation.service";
+import { cancelRazorpaySubscription } from "../services/razorpay.service";
 import prisma from "../config/prisma";
 
 export const createSubscriptionController = async (
@@ -390,7 +391,8 @@ export const cancelSubscriptionController = async (
   const cancellationRequest = await requestRazorpayCancellation(
     subscription.razorpaySubscriptionId,
     keepAccessUntilPeriodEnd,
-    cancellationIntentAlreadyPresent
+    cancellationIntentAlreadyPresent,
+    cancelRazorpaySubscription
   );
 
   if (cancellationRequest.kind === "reconciliation_required") {
