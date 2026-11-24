@@ -17,6 +17,55 @@ export const unwrapRazorpayWebhookPayload = (value: any): any => {
   return value;
 };
 
+export type RazorpayInvoiceSubscriptionLookup = {
+  subscription_id?: string | null;
+};
+
+/**
+ * Resolve the CloudBox subscription associated with a failed payment.
+ *
+ * Razorpay's payment.failed payload may omit subscription_id from the payment
+ * entity. For subscription invoices, invoice.fetch(invoice_id) exposes the
+ * authoritative subscription_id. Lookup errors deliberately propagate so the
+ * webhook can be retried instead of silently losing a billing transition.
+ */
+export const resolvePaymentFailedSubscriptionId = async (
+  payload: any,
+  fetchInvoice: (
+    invoiceId: string
+  ) => Promise<RazorpayInvoiceSubscriptionLookup>
+): Promise<string | null> => {
+  const eventPayload = unwrapRazorpayWebhookPayload(payload);
+  const payment = eventPayload?.payment?.entity;
+
+  const directPaymentSubscriptionId = payment?.subscription_id;
+  if (
+    typeof directPaymentSubscriptionId === "string" &&
+    directPaymentSubscriptionId.trim()
+  ) {
+    return directPaymentSubscriptionId.trim();
+  }
+
+  const siblingSubscriptionId = eventPayload?.subscription?.entity?.id;
+  if (
+    typeof siblingSubscriptionId === "string" &&
+    siblingSubscriptionId.trim()
+  ) {
+    return siblingSubscriptionId.trim();
+  }
+
+  const invoiceId = payment?.invoice_id;
+  if (typeof invoiceId !== "string" || !invoiceId.trim()) {
+    return null;
+  }
+
+  const invoice = await fetchInvoice(invoiceId.trim());
+  return typeof invoice?.subscription_id === "string" &&
+    invoice.subscription_id.trim()
+    ? invoice.subscription_id.trim()
+    : null;
+};
+
 export type ParsedSubscriptionCharge = {
   subscriptionId: string;
   paymentId: string;
