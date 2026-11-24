@@ -1,11 +1,11 @@
 
 import { Request, Response } from "express";
-import { randomBytes } from "node:crypto";
 import bcrypt from "bcrypt";
 import { OAuth2Client } from "google-auth-library";
 import prisma from "../config/prisma";
 import { createSession, revokeSession } from "../services/session.service";
 import { generateAndSendOTP, verifyOTP } from "../services/otp.service";
+import { getOrCreateDeviceId } from "../utils/session-device";
 import { env } from "../config/env";
 import {
   isServiceUnavailable,
@@ -13,37 +13,6 @@ import {
 } from "../utils/dependency-error";
 
 const googleClient = new OAuth2Client(env.GOOGLE.CLIENT_ID);
-
-const DEVICE_ID_COOKIE = "device_id";
-const DEVICE_ID_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
-const DEVICE_ID_PATTERN = /^[a-f0-9]{64}$/i;
-
-// This opaque, non-authentication cookie identifies a browser profile across
-// logins. It is intentionally retained on logout so the same profile reuses
-// its existing device slot the next time the user signs in.
-const getOrCreateDeviceId = (req: Request, res: Response): string => {
-    const existingDeviceId = req.cookies?.[DEVICE_ID_COOKIE];
-
-    if (
-        typeof existingDeviceId === "string" &&
-        DEVICE_ID_PATTERN.test(existingDeviceId)
-    ) {
-        return existingDeviceId.toLowerCase();
-    }
-
-    const deviceId = randomBytes(32).toString("hex");
-    const isProduction = env.NODE_ENV === "production";
-
-    res.cookie(DEVICE_ID_COOKIE, deviceId, {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? "none" : "lax",
-        maxAge: DEVICE_ID_MAX_AGE_MS,
-        path: "/",
-    });
-
-    return deviceId;
-};
 
 const setSessionCookie = (
     res: Response,
