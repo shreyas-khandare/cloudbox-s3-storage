@@ -80,6 +80,13 @@ export const createSession = async (userId: string, deviceId: string) => {
                 expiresAt,
             },
         });
+    }, {
+        // Neon pooled connections and per-user advisory-lock contention can
+        // take longer than Prisma's short interactive-transaction defaults.
+        // Keep the wait bounded while allowing concurrent login requests to
+        // serialize and evaluate the device limit deterministically.
+        maxWait: 15_000,
+        timeout: 30_000,
     });
 
     return {
