@@ -1,4 +1,3 @@
-import { cancelRazorpaySubscription } from "./razorpay.service";
 import { isDefinitiveRazorpayRejection } from "../utils/razorpay-error";
 
 export type CancellationProvider = (
@@ -23,7 +22,7 @@ export const requestRazorpayCancellation = async (
   subscriptionId: string,
   cancelAtCycleEnd: boolean,
   cancellationIntentAlreadyPresent: boolean,
-  cancelProvider: CancellationProvider = cancelRazorpaySubscription
+  cancelProvider: CancellationProvider
 ): Promise<CancellationRequestResult> => {
   try {
     await cancelProvider(subscriptionId, cancelAtCycleEnd);
