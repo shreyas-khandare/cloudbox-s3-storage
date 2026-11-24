@@ -357,7 +357,8 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
           subscription: {
             entity: {
               id: razorpaySubscriptionId,
-              status: "authenticated",
+              // Razorpay's actual webhook snapshot reports "active".
+              status: "active",
             },
           },
         },
@@ -365,6 +366,12 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       );
 
       await processRazorpayWebhookEvent(eventId);
+
+      const processedAuthEvent = await prisma.razorpayWebhookEvent.findUnique({
+        where: { eventId },
+        select: { status: true },
+      });
+      assert.equal(processedAuthEvent?.status, WebhookStatus.PROCESSED);
 
       const [subscription, updatedUser] = await Promise.all([
         prisma.subscription.findUnique({ where: { razorpaySubscriptionId } }),
@@ -377,6 +384,126 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       assert.equal(subscription?.status, SubscriptionStatus.HALTED);
       assert.equal(updatedUser?.plan, Plan.FREE);
       assert.equal(updatedUser?.subscriptionStatus, SubscriptionStatus.HALTED);
+    });
+
+    await t.test("resolves payment.failed subscription through its Razorpay invoice", async () => {
+      const failedUser = await prisma.user.create({
+        data: {
+          name: "CloudBox Invoice-Linked Payment Failure Test",
+          email: `payment-failed-invoice-${prefix}@example.test`,
+          emailVerified: true,
+        },
+        select: { id: true },
+      });
+      const failedSubscriptionId = `sub_payment_failed_invoice_${prefix}`;
+      const failedPaymentId = `pay_payment_failed_invoice_${prefix}`;
+      const failedInvoiceId = `inv_payment_failed_invoice_${prefix}`;
+      const failedEventId = `evt_payment_failed_invoice_${prefix}`;
+
+      try {
+        const failedSubscription = await prisma.subscription.create({
+          data: {
+            userId: failedUser.id,
+            plan: Plan.PRO,
+            razorpayPlanId: "plan_test_pro",
+            razorpaySubscriptionId: failedSubscriptionId,
+            status: SubscriptionStatus.ACTIVE,
+          },
+          select: { id: true },
+        });
+
+        await prisma.user.update({
+          where: { id: failedUser.id },
+          data: {
+            plan: Plan.PRO,
+            subscriptionStatus: SubscriptionStatus.ACTIVE,
+            storageLimit: 100n * 1024n * 1024n * 1024n,
+          },
+        });
+
+        await prisma.razorpayWebhookEvent.create({
+          data: {
+            eventId: failedEventId,
+            eventType: "payment.failed",
+            // Deliberately no subscription_id: the real failed event shape
+            // supplied by Razorpay only contained payment.invoice_id.
+            payload: envelope("payment.failed", {
+              payment: {
+                entity: {
+                  id: failedPaymentId,
+                  status: "failed",
+                  amount: 14900,
+                  currency: "INR",
+                  invoice_id: failedInvoiceId,
+                  error_description: "Payment processing failed at bank",
+                },
+              },
+            }),
+            status: WebhookStatus.PENDING,
+          },
+        });
+
+        let invoiceFetchCount = 0;
+        await processRazorpayWebhookEvent(failedEventId, {
+          fetchInvoice: async (invoiceId) => {
+            invoiceFetchCount += 1;
+            assert.equal(invoiceId, failedInvoiceId);
+            return { subscription_id: failedSubscriptionId };
+          },
+        });
+
+        const [payment, subscription, updatedUser, webhook] = await Promise.all([
+          prisma.payment.findUnique({
+            where: { razorpayPaymentId: failedPaymentId },
+          }),
+          prisma.subscription.findUnique({
+            where: { id: failedSubscription.id },
+          }),
+          prisma.user.findUnique({ where: { id: failedUser.id } }),
+          prisma.razorpayWebhookEvent.findUnique({
+            where: { eventId: failedEventId },
+          }),
+        ]);
+
+        assert.equal(invoiceFetchCount, 1);
+        assert.equal(payment?.status, PaymentStatus.FAILED);
+        assert.equal(payment?.subscriptionId, failedSubscription.id);
+        assert.equal(subscription?.status, SubscriptionStatus.PAST_DUE);
+        assert.ok(subscription?.gracePeriodEnd && subscription.gracePeriodEnd > new Date());
+        assert.equal(updatedUser?.plan, Plan.PRO);
+        assert.equal(updatedUser?.subscriptionStatus, SubscriptionStatus.PAST_DUE);
+        assert.equal(webhook?.status, WebhookStatus.PROCESSED);
+        assert.equal(webhook?.razorpaySubscriptionId, failedSubscriptionId);
+
+        // Reprocessing a processed event must not create a second payment.
+        const duplicate = await processRazorpayWebhookEvent(failedEventId, {
+          fetchInvoice: async () => {
+            assert.fail("A processed duplicate must not fetch the invoice again");
+          },
+        });
+        assert.equal(duplicate.duplicate, true);
+        assert.equal(
+          await prisma.payment.count({ where: { subscriptionId: failedSubscription.id } }),
+          1
+        );
+      } finally {
+        await prisma.razorpayWebhookEvent.deleteMany({
+          where: { eventId: failedEventId },
+        });
+        const failedSubscription = await prisma.subscription.findUnique({
+          where: { razorpaySubscriptionId: failedSubscriptionId },
+          select: { id: true },
+        });
+        if (failedSubscription) {
+          await prisma.payment.deleteMany({
+            where: { subscriptionId: failedSubscription.id },
+          });
+        }
+        await prisma.subscription.deleteMany({
+          where: { razorpaySubscriptionId: failedSubscriptionId },
+        });
+        await prisma.user.delete({ where: { id: failedUser.id } });
+      }
     });
 
     await t.test("subscription.completed cannot grant access without a recorded captured payment", async () => {
