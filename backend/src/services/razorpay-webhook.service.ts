@@ -9,6 +9,7 @@ import type { Prisma } from "@prisma/client";
 import prisma from "../config/prisma";
 import { processRefundProcessedEvent } from "./razorpay-refund.service";
 import {
+    parseSubscriptionAuthenticatedEvent,
     parseSubscriptionChargedEvent,
     resolvePaymentFailedSubscriptionId,
     unwrapRazorpayWebhookPayload,
@@ -939,21 +940,10 @@ export const processSubscriptionResumedEvent = async (
  * was captured; entitlement is still granted only by subscription.charged.
  */
 export const processSubscriptionAuthenticatedEvent = async (payload: any) => {
-  const entity = payload?.subscription?.entity;
-
-  // Razorpay names this event subscription.authenticated, but its embedded
-  // subscription snapshot already reports status "active". Accept both the
-  // current provider status and the older "authenticated" representation.
-  if (
-    typeof entity?.id !== "string" ||
-    !entity.id ||
-    !["active", "authenticated"].includes(entity.status)
-  ) {
-    throw new Error("Invalid subscription.authenticated payload");
-  }
+  const { subscriptionId } = parseSubscriptionAuthenticatedEvent(payload);
 
   const subscription = await prisma.subscription.findUnique({
-    where: { razorpaySubscriptionId: entity.id },
+    where: { razorpaySubscriptionId: subscriptionId },
     select: { status: true },
   });
 
