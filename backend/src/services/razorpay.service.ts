@@ -6,6 +6,22 @@ const razorpay = new Razorpay({
   key_secret: env.RAZORPAY.KEY_SECRET,
 });
 
+export type RazorpayInvoiceDetails = {
+  id?: string;
+  subscription_id?: string | null;
+};
+
+/**
+ * Fetch a Razorpay invoice. Subscription invoice responses include the
+ * subscription_id used to correlate payment.failed events whose payment
+ * entity does not contain that association.
+ */
+export const fetchRazorpayInvoice = async (
+  invoiceId: string
+): Promise<RazorpayInvoiceDetails> => {
+  return (await razorpay.invoices.fetch(invoiceId)) as RazorpayInvoiceDetails;
+};
+
 export const createRazorpaySubscription = async (
   planId: string,
   userId: string
