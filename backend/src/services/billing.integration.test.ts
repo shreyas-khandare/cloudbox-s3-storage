@@ -224,6 +224,7 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
         const firstLogin = await createSession(sessionUser.id, firstDeviceId);
         const firstStoredSession = await findValidSession(firstLogin.token);
         assert.equal(firstStoredSession?.userId, sessionUser.id);
+        assert.match(firstStoredSession?.deviceId ?? "", /^[a-f0-9]{64}$/);
 
         // A second login from the same browser profile rotates its token
         // instead of inserting an additional row/device slot.
@@ -258,9 +259,53 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
         const thirdDeviceLogin = await createSession(sessionUser.id, thirdDeviceId);
         assert.ok(await findValidSession(thirdDeviceLogin.token));
         assert.equal(await prisma.session.count({ where: { userId: sessionUser.id } }), 2);
+
+        // Expired sessions must stop occupying a device slot during a new login.
+        const expiringSession = await findValidSession(thirdDeviceLogin.token);
+        assert.ok(expiringSession);
+        await prisma.session.update({
+          where: { id: expiringSession.id },
+          data: { expiresAt: new Date(Date.now() - 1000) },
+        });
+
+        const replacementDeviceLogin = await createSession(sessionUser.id, "d".repeat(64));
+        assert.ok(await findValidSession(replacementDeviceLogin.token));
+        assert.equal(await findValidSession(thirdDeviceLogin.token), null);
+        assert.equal(await prisma.session.count({ where: { userId: sessionUser.id } }), 2);
       } finally {
         await prisma.session.deleteMany({ where: { userId: sessionUser.id } });
         await prisma.user.delete({ where: { id: sessionUser.id } });
+      }
+    });
+
+    await t.test("enforces the FREE device limit under concurrent logins", async () => {
+      const concurrentUser = await prisma.user.create({
+        data: {
+          name: "CloudBox Concurrent Device Session Test",
+          email: `concurrent-device-session-${prefix}@example.test`,
+          emailVerified: true,
+        },
+        select: { id: true },
+      });
+
+      try {
+        const results = await Promise.allSettled([
+          createSession(concurrentUser.id, "e".repeat(64)),
+          createSession(concurrentUser.id, "f".repeat(64)),
+          createSession(concurrentUser.id, "g".repeat(64)),
+        ]);
+
+        assert.equal(results.filter((result) => result.status === "fulfilled").length, 2);
+        const rejected = results.find((result) => result.status === "rejected");
+        assert.ok(rejected);
+        if (rejected.status === "rejected") {
+          assert.match(String(rejected.reason), /DEVICE_LIMIT_REACHED/);
+        }
+
+        assert.equal(await prisma.session.count({ where: { userId: concurrentUser.id } }), 2);
+      } finally {
+        await prisma.session.deleteMany({ where: { userId: concurrentUser.id } });
+        await prisma.user.delete({ where: { id: concurrentUser.id } });
       }
     });
 
