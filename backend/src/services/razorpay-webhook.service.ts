@@ -156,7 +156,8 @@ export const handlePaymentFailure = async (
   razorpayPaymentId: string,
   amount: number,
   currency: string,
-  failureReason: string
+  failureReason: string,
+  webhookOccurredAt?: Date
 ) => {
   return prisma.$transaction(async (tx) => {
     const subscription = await tx.subscription.findUnique({
@@ -238,6 +239,19 @@ export const handlePaymentFailure = async (
       return { duplicate: false };
     }
 
+    // Keep an older failure from downgrading an account after a newer
+    // successful renewal has already been captured. The failed invoice above
+    // is still recorded for billing history and reconciliation.
+    if (
+      await hasCapturedPaymentAfterWebhook(
+        tx,
+        subscription.id,
+        webhookOccurredAt
+      )
+    ) {
+      return { duplicate: false, stale: true };
+    }
+
     // Preserve the existing grace period on repeated failures.
     const gracePeriodEnd =
       subscription.gracePeriodEnd ??
@@ -276,7 +290,8 @@ export const processPaymentFailedEvent = async (
   payload: any,
   fetchInvoice: (
     invoiceId: string
-  ) => Promise<RazorpayInvoiceSubscriptionLookup> = fetchRazorpayInvoice
+  ) => Promise<RazorpayInvoiceSubscriptionLookup> = fetchRazorpayInvoice,
+  webhookOccurredAt?: Date
 ) => {
   const payment = payload?.payment?.entity;
 
@@ -310,12 +325,26 @@ export const processPaymentFailedEvent = async (
     };
   }
 
+  const localSubscription = await prisma.subscription.findUnique({
+    where: { razorpaySubscriptionId: subscriptionId },
+    select: { id: true },
+  });
+
+  if (!localSubscription) {
+    return {
+      duplicate: false,
+      ignored: true,
+      reason: "Razorpay subscription is not managed by CloudBox",
+    };
+  }
+
   const result = await handlePaymentFailure(
     subscriptionId,
     payment.id,
     payment.amount,
     payment.currency,
-    payment.error_description || "Payment failed"
+    payment.error_description || "Payment failed",
+    webhookOccurredAt
   );
 
   return {
@@ -410,7 +439,8 @@ export const processRazorpayWebhookEvent = async (
       case "payment.failed": {
         const failureResult = await processPaymentFailedEvent(
           eventPayload,
-          dependencies.fetchInvoice ?? fetchRazorpayInvoice
+          dependencies.fetchInvoice ?? fetchRazorpayInvoice,
+          getWebhookOccurredAt(webhookEvent.payload)
         );
 
         // Persist the invoice-resolved association so this event can be found
@@ -947,7 +977,17 @@ export const processSubscriptionAuthenticatedEvent = async (payload: any) => {
     select: { status: true },
   });
 
-  if (!subscription) throw new Error("Subscription not found");
+  if (!subscription) {
+    // The webhook endpoint may also receive events for subscriptions not
+    // created by CloudBox. Authentication is informational and grants no
+    // entitlement, so acknowledge an unlinked provider subscription.
+    return {
+      authenticated: false,
+      ignored: true,
+      reason: "Razorpay subscription is not managed by CloudBox",
+      entitlementGranted: false,
+    };
+  }
 
   // Authentication alone is not proof that the subscription invoice was
   // captured. Paid access is still granted only by subscription.charged.
