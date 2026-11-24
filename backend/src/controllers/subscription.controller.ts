@@ -6,7 +6,7 @@ import { createSubscription } from "../services/subscription.service";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
 import { MAX_SINGLE_UPLOAD_SIZE } from "../config/upload";
 import { cancelRazorpaySubscription } from "../services/razorpay.service";
-import { isDefinitiveRazorpayRejection } from "../utils/razorpay-error";
+import { requestRazorpayCancellation } from "../services/subscription-cancellation.service";
 import prisma from "../config/prisma";
 
 export const createSubscriptionController = async (
@@ -357,13 +357,7 @@ export const cancelSubscriptionController = async (
     });
   }
 
-  if (subscription.cancelAtPeriodEnd) {
-    return res.status(200).json({
-      message: "Subscription cancellation is already scheduled",
-      cancelAtPeriodEnd: true,
-      currentPeriodEnd: subscription.currentPeriodEnd,
-    });
-  }
+  const cancellationIntentAlreadyPresent = subscription.cancelAtPeriodEnd;
 
   const now = new Date();
   // A fully refunded subscription must be cancelled immediately even
@@ -377,7 +371,7 @@ export const cancelSubscriptionController = async (
   // Persist cycle-end intent before calling Razorpay. Razorpay can emit
   // subscription.cancelled while the API request is still in flight; the
   // webhook must already know to preserve the customer's paid access.
-  if (keepAccessUntilPeriodEnd) {
+  if (keepAccessUntilPeriodEnd && !cancellationIntentAlreadyPresent) {
     try {
       await prisma.subscription.update({
         where: { id: subscription.id },
@@ -394,27 +388,28 @@ export const cancelSubscriptionController = async (
   // If a future paid period remains, schedule cancellation for its end.
   // Past-due/halted/refunded subscriptions whose period has ended are
   // cancelled immediately, removing the provider's future billing schedule.
-  try {
-    await cancelRazorpaySubscription(
-      subscription.razorpaySubscriptionId,
-      keepAccessUntilPeriodEnd
-    );
-  } catch (error) {
-    console.error("[Billing] Razorpay cancellation request failed:", error);
+  const cancellationRequest = await requestRazorpayCancellation(
+    subscription.razorpaySubscriptionId,
+    keepAccessUntilPeriodEnd,
+    cancellationIntentAlreadyPresent
+  );
 
-    // Only a provider 4xx response proves that Razorpay rejected the request.
-    // Network errors, timeouts and 5xx responses are ambiguous: Razorpay may
-    // have committed the cancellation before the response was lost.
-    if (!isDefinitiveRazorpayRejection(error)) {
-      return res.status(503).json({
-        message: "Razorpay's cancellation outcome could not be confirmed. CloudBox has retained the cancellation intent; refresh Billing later or contact support before retrying.",
-        reconciliationRequired: true,
-      });
-    }
+  if (cancellationRequest.kind === "reconciliation_required") {
+    console.error("[Billing] Razorpay cancellation outcome requires reconciliation:", cancellationRequest.error);
+    return res.status(503).json({
+      message: cancellationIntentAlreadyPresent
+        ? "CloudBox still has a cancellation request recorded, but Razorpay could not reconfirm it. Your access has not been removed. Retry the verification or contact support."
+        : "Razorpay's cancellation outcome could not be confirmed. CloudBox has retained the cancellation intent; retry the verification later.",
+      reconciliationRequired: true,
+    });
+  }
 
-    // A definitive 4xx rejection means the provider did not accept the request,
-    // so the pre-written cycle-end intent can safely be rolled back.
-    if (keepAccessUntilPeriodEnd) {
+  if (cancellationRequest.kind === "rejected") {
+    console.error("[Billing] Razorpay rejected the cancellation request:", cancellationRequest.error);
+
+    // Roll back only intent written by this request. If a previous request
+    // already persisted the intent, retain it until provider state is reconciled.
+    if (keepAccessUntilPeriodEnd && !cancellationIntentAlreadyPresent) {
       try {
         await prisma.subscription.updateMany({
           where: {
