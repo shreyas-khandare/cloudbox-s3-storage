@@ -115,6 +115,7 @@ export const createSubscription = async (
       subscription,
       razorpay: {
         id: razorpaySubscription.id,
+        keyId: env.RAZORPAY.KEY_ID,
         shortUrl: checkoutUrl,
       },
     };

@@ -22,6 +22,12 @@ test("Business plan matches the 5 GB single-request S3 cap", () => {
   assert.equal(formatUploadLimitLabel(SUBSCRIPTION_PLANS.BUSINESS.maxFileSize), "5 GB");
 });
 
+test("device limits match the Free, Pro, and Business plan policy", () => {
+  assert.equal(SUBSCRIPTION_PLANS.FREE.deviceLimit, 2);
+  assert.equal(SUBSCRIPTION_PLANS.PRO.deviceLimit, 3);
+  assert.equal(SUBSCRIPTION_PLANS.BUSINESS.deviceLimit, 3);
+});
+
 test("no plan exceeds the current single-request S3 cap", () => {
   for (const plan of Object.values(SUBSCRIPTION_PLANS)) {
     assert.ok(

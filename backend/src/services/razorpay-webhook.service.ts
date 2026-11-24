@@ -4,10 +4,18 @@ import {
     SubscriptionStatus,
     WebhookStatus,
 } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 import prisma from "../config/prisma";
 import { processRefundProcessedEvent } from "./razorpay-refund.service";
-import { parseSubscriptionChargedEvent, unwrapRazorpayWebhookPayload } from "../utils/razorpay-webhook-payload";
+import {
+    parseSubscriptionAuthenticatedEvent,
+    parseSubscriptionChargedEvent,
+    resolvePaymentFailedSubscriptionId,
+    unwrapRazorpayWebhookPayload,
+    type RazorpayInvoiceSubscriptionLookup,
+} from "../utils/razorpay-webhook-payload";
+import { fetchRazorpayInvoice } from "./razorpay.service";
 
 import {
     SUBSCRIPTION_PLANS,
@@ -34,10 +42,11 @@ export const activateSubscription = async (
 
     if (
       subscription.status === SubscriptionStatus.CANCELLED ||
-      subscription.status === SubscriptionStatus.EXPIRED
+      subscription.status === SubscriptionStatus.EXPIRED ||
+      subscription.status === SubscriptionStatus.REFUNDED
     ) {
       throw new Error(
-        "Cannot activate a cancelled or expired subscription"
+        "Cannot activate a cancelled, expired, or refunded subscription"
       );
     }
 
@@ -147,7 +156,8 @@ export const handlePaymentFailure = async (
   razorpayPaymentId: string,
   amount: number,
   currency: string,
-  failureReason: string
+  failureReason: string,
+  webhookOccurredAt?: Date
 ) => {
   return prisma.$transaction(async (tx) => {
     const subscription = await tx.subscription.findUnique({
@@ -221,9 +231,25 @@ export const handlePaymentFailure = async (
     // Do not change already cancelled or expired subscriptions.
     if (
       subscription.status === SubscriptionStatus.CANCELLED ||
-      subscription.status === SubscriptionStatus.EXPIRED
+      subscription.status === SubscriptionStatus.EXPIRED ||
+      subscription.status === SubscriptionStatus.REFUNDED
     ) {
+      // A full refund is terminal even while provider-side cancellation is
+      // awaiting retry. Record the failed invoice, but do not reopen billing.
       return { duplicate: false };
+    }
+
+    // Keep an older failure from downgrading an account after a newer
+    // successful renewal has already been captured. The failed invoice above
+    // is still recorded for billing history and reconciliation.
+    if (
+      await hasCapturedPaymentAfterWebhook(
+        tx,
+        subscription.id,
+        webhookOccurredAt
+      )
+    ) {
+      return { duplicate: false, stale: true };
     }
 
     // Preserve the existing grace period on repeated failures.
@@ -261,33 +287,82 @@ export const handlePaymentFailure = async (
 };
 
 export const processPaymentFailedEvent = async (
-    payload: any
+  payload: any,
+  fetchInvoice: (
+    invoiceId: string
+  ) => Promise<RazorpayInvoiceSubscriptionLookup> = fetchRazorpayInvoice,
+  webhookOccurredAt?: Date
 ) => {
-    const payment = payload?.payment?.entity;
-    const subscriptionId =
-      payment?.subscription_id ?? payload?.subscription?.entity?.id;
+  const payment = payload?.payment?.entity;
 
-    if (
-        !payment?.id ||
-        !subscriptionId ||
-        payment.status !== "failed" ||
-        !Number.isInteger(payment.amount) ||
-        typeof payment.currency !== "string"
-    ) {
-        throw new Error("Invalid payment.failed payload");
-    }
+  if (
+    typeof payment?.id !== "string" ||
+    !payment.id ||
+    payment.status !== "failed" ||
+    !Number.isInteger(payment.amount) ||
+    payment.amount <= 0 ||
+    typeof payment.currency !== "string"
+  ) {
+    throw new Error("Invalid payment.failed payload");
+  }
 
-    return handlePaymentFailure(
-        subscriptionId,
-        payment.id,
-        payment.amount,
-        payment.currency,
-        payment.error_description || "Payment failed"
-    );
+  // Razorpay's payment.failed payload can omit subscription_id. Resolve the
+  // association from the invoice instead of guessing from customer email.
+  // Transient invoice API errors propagate so Razorpay can retry delivery.
+  const subscriptionId = await resolvePaymentFailedSubscriptionId(
+    payload,
+    fetchInvoice
+  );
+
+  // payment.failed is also emitted for non-subscription payments. A valid
+  // payment with no CloudBox subscription association is acknowledged without
+  // changing any user's billing entitlement.
+  if (!subscriptionId) {
+    return {
+      duplicate: false,
+      ignored: true,
+      reason: "Payment is not associated with a CloudBox subscription",
+    };
+  }
+
+  const localSubscription = await prisma.subscription.findUnique({
+    where: { razorpaySubscriptionId: subscriptionId },
+    select: { id: true },
+  });
+
+  if (!localSubscription) {
+    return {
+      duplicate: false,
+      ignored: true,
+      reason: "Razorpay subscription is not managed by CloudBox",
+    };
+  }
+
+  const result = await handlePaymentFailure(
+    subscriptionId,
+    payment.id,
+    payment.amount,
+    payment.currency,
+    payment.error_description || "Payment failed",
+    webhookOccurredAt
+  );
+
+  return {
+    ...result,
+    subscriptionId,
+  };
+};
+
+type RazorpayWebhookDependencies = {
+  cancelRefundedSubscription?: (subscriptionId: string) => Promise<unknown>;
+  fetchInvoice?: (
+    invoiceId: string
+  ) => Promise<RazorpayInvoiceSubscriptionLookup>;
 };
 
 export const processRazorpayWebhookEvent = async (
-  eventId: string
+  eventId: string,
+  dependencies: RazorpayWebhookDependencies = {}
 ) => {
   const webhookEvent = await prisma.razorpayWebhookEvent.findUnique({
     where: { eventId },
@@ -361,12 +436,32 @@ export const processRazorpayWebhookEvent = async (
         await processSubscriptionActivatedEvent(eventPayload);
         break;
 
-      case "payment.failed":
-        await processPaymentFailedEvent(eventPayload);
+      case "payment.failed": {
+        const failureResult = await processPaymentFailedEvent(
+          eventPayload,
+          dependencies.fetchInvoice ?? fetchRazorpayInvoice,
+          getWebhookOccurredAt(webhookEvent.payload)
+        );
+
+        // Persist the invoice-resolved association so this event can be found
+        // later by subscription ID for diagnostics and safe reprocessing.
+        if (
+          "subscriptionId" in failureResult &&
+          typeof failureResult.subscriptionId === "string"
+        ) {
+          await prisma.razorpayWebhookEvent.update({
+            where: { eventId },
+            data: { razorpaySubscriptionId: failureResult.subscriptionId },
+          });
+        }
         break;
+      }
 
       case "refund.processed":
-        await processRefundProcessedEvent(eventPayload);
+        await processRefundProcessedEvent(
+          eventPayload,
+          dependencies.cancelRefundedSubscription
+        );
         break;
 
       case "subscription.cancelled":
@@ -374,15 +469,31 @@ export const processRazorpayWebhookEvent = async (
         break;
 
       case "subscription.pending":
-        await processSubscriptionPendingEvent(eventPayload);
+        await processSubscriptionPendingEvent(eventPayload, getWebhookOccurredAt(webhookEvent.payload));
         break;
 
       case "subscription.halted":
-        await processSubscriptionHaltedEvent(eventPayload);
+        await processSubscriptionHaltedEvent(eventPayload, getWebhookOccurredAt(webhookEvent.payload));
         break;
 
       case "subscription.resumed":
         await processSubscriptionResumedEvent(eventPayload);
+        break;
+
+      case "subscription.authenticated":
+        await processSubscriptionAuthenticatedEvent(eventPayload);
+        break;
+
+      case "subscription.completed":
+        await processSubscriptionCompletedEvent(eventPayload);
+        break;
+
+      case "subscription.updated":
+        await processSubscriptionInformationalEvent(eventPayload, "updated");
+        break;
+
+      case "subscription.paused":
+        await processSubscriptionInformationalEvent(eventPayload, "paused");
         break;
 
       default:
@@ -547,6 +658,41 @@ export const processSubscriptionCancelledEvent = async (
       return { duplicate: true };
     }
 
+    // A cycle-end cancellation stops future renewals but does not remove
+    // already-paid access before the current billing period expires.
+    const preservePaidAccessUntilPeriodEnd =
+      subscription.cancelAtPeriodEnd &&
+      subscription.currentPeriodEnd !== null &&
+      subscription.currentPeriodEnd > new Date();
+
+    if (preservePaidAccessUntilPeriodEnd) {
+      await tx.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          status: SubscriptionStatus.ACTIVE,
+          cancelAtPeriodEnd: true,
+          gracePeriodEnd: null,
+        },
+      });
+
+      // The subscription's cycle-end cancellation must not overwrite a
+      // different plan entitlement if another subscription has since become
+      // the user's current paid subscription.
+      await tx.user.updateMany({
+        where: {
+          id: subscription.userId,
+          plan: subscription.plan,
+        },
+        data: {
+          subscriptionStatus: SubscriptionStatus.ACTIVE,
+          currentPeriodEnd: subscription.currentPeriodEnd,
+          gracePeriodEnd: null,
+        },
+      });
+
+      return { duplicate: false, cancellationScheduled: true };
+    }
+
     await tx.subscription.update({
       where: { id: subscription.id },
       data: {
@@ -590,12 +736,53 @@ export const processSubscriptionCancelledEvent = async (
 };
 
 
+const getWebhookOccurredAt = (storedPayload: Prisma.JsonValue): Date | undefined => {
+  if (
+    typeof storedPayload !== "object" ||
+    storedPayload === null ||
+    Array.isArray(storedPayload)
+  ) {
+    return undefined;
+  }
+
+  const createdAt = (storedPayload as Prisma.JsonObject).created_at;
+  return typeof createdAt === "number" && Number.isFinite(createdAt) && createdAt > 0
+    ? new Date(createdAt * 1000)
+    : undefined;
+};
+
+/**
+ * Protect a newer successful charge from an older failure webhook delivered
+ * out of order. Razorpay's subscription webhook envelope includes created_at.
+ */
+const hasCapturedPaymentAfterWebhook = async (
+  tx: Prisma.TransactionClient,
+  subscriptionId: string,
+  webhookOccurredAt?: Date
+): Promise<boolean> => {
+  if (!webhookOccurredAt) return false;
+
+  const newerCapturedPayment = await tx.payment.findFirst({
+    where: {
+      subscriptionId,
+      status: {
+        in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED],
+      },
+      paidAt: { gt: webhookOccurredAt },
+    },
+    select: { id: true },
+  });
+
+  return Boolean(newerCapturedPayment);
+};
+
 export const processSubscriptionPendingEvent = async (
-  payload: any
+  payload: any,
+  webhookOccurredAt?: Date
 ) => {
   const razorpaySubscription = payload?.subscription?.entity;
 
-  if (!razorpaySubscription?.id) {
+  if (!razorpaySubscription?.id || razorpaySubscription.status !== "pending") {
     throw new Error("Invalid subscription.pending payload");
   }
 
@@ -613,11 +800,24 @@ export const processSubscriptionPendingEvent = async (
     if (
       subscription.status === SubscriptionStatus.CANCELLED ||
       subscription.status === SubscriptionStatus.EXPIRED ||
-      subscription.status === SubscriptionStatus.ACTIVE ||
       subscription.status === SubscriptionStatus.HALTED ||
-      subscription.status === SubscriptionStatus.REFUNDED
+      subscription.status === SubscriptionStatus.REFUNDED ||
+      subscription.status === SubscriptionStatus.PAST_DUE
     ) {
       return { ignored: true };
+    }
+
+    // A failed renewal legitimately moves an ACTIVE subscription to PAST_DUE.
+    // Ignore only a stale pending webhook that arrived after a newer captured
+    // payment already restored the subscription.
+    if (
+      await hasCapturedPaymentAfterWebhook(
+        tx,
+        subscription.id,
+        webhookOccurredAt
+      )
+    ) {
+      return { ignored: true, stale: true };
     }
 
     const gracePeriodEnd =
@@ -635,8 +835,13 @@ export const processSubscriptionPendingEvent = async (
       },
     });
 
-    await tx.user.update({
-      where: { id: subscription.userId },
+    // Do not replace an unrelated plan if the user's current entitlement has
+    // since moved to another subscription.
+    await tx.user.updateMany({
+      where: {
+        id: subscription.userId,
+        OR: [{ plan: subscription.plan }, { plan: Plan.FREE }],
+      },
       data: {
         subscriptionStatus: SubscriptionStatus.PAST_DUE,
         gracePeriodEnd,
@@ -648,11 +853,12 @@ export const processSubscriptionPendingEvent = async (
 };
 
 export const processSubscriptionHaltedEvent = async (
-  payload: any
+  payload: any,
+  webhookOccurredAt?: Date
 ) => {
   const razorpaySubscription = payload?.subscription?.entity;
 
-  if (!razorpaySubscription?.id) {
+  if (!razorpaySubscription?.id || razorpaySubscription.status !== "halted") {
     throw new Error("Invalid subscription.halted payload");
   }
 
@@ -670,10 +876,20 @@ export const processSubscriptionHaltedEvent = async (
     if (
       subscription.status === SubscriptionStatus.CANCELLED ||
       subscription.status === SubscriptionStatus.EXPIRED ||
-      subscription.status === SubscriptionStatus.ACTIVE ||
-      subscription.status === SubscriptionStatus.REFUNDED
+      subscription.status === SubscriptionStatus.REFUNDED ||
+      subscription.status === SubscriptionStatus.HALTED
     ) {
       return { ignored: true };
+    }
+
+    if (
+      await hasCapturedPaymentAfterWebhook(
+        tx,
+        subscription.id,
+        webhookOccurredAt
+      )
+    ) {
+      return { ignored: true, stale: true };
     }
 
     const gracePeriodEnd =
@@ -691,8 +907,11 @@ export const processSubscriptionHaltedEvent = async (
       },
     });
 
-    await tx.user.update({
-      where: { id: subscription.userId },
+    await tx.user.updateMany({
+      where: {
+        id: subscription.userId,
+        OR: [{ plan: subscription.plan }, { plan: Plan.FREE }],
+      },
       data: {
         subscriptionStatus: SubscriptionStatus.HALTED,
         gracePeriodEnd,
@@ -743,4 +962,199 @@ export const processSubscriptionResumedEvent = async (
     resumed: true,
     awaitingPaymentConfirmation: true,
   };
+};
+
+/**
+ * Authentication means the customer completed the first subscription
+ * authentication payment. It is not, by itself, proof that the plan invoice
+ * was captured; entitlement is still granted only by subscription.charged.
+ */
+export const processSubscriptionAuthenticatedEvent = async (payload: any) => {
+  const { subscriptionId } = parseSubscriptionAuthenticatedEvent(payload);
+
+  const subscription = await prisma.subscription.findUnique({
+    where: { razorpaySubscriptionId: subscriptionId },
+    select: { status: true },
+  });
+
+  if (!subscription) {
+    // The webhook endpoint may also receive events for subscriptions not
+    // created by CloudBox. Authentication is informational and grants no
+    // entitlement, so acknowledge an unlinked provider subscription.
+    return {
+      authenticated: false,
+      ignored: true,
+      reason: "Razorpay subscription is not managed by CloudBox",
+      entitlementGranted: false,
+    };
+  }
+
+  // Authentication alone is not proof that the subscription invoice was
+  // captured. Paid access is still granted only by subscription.charged.
+  return {
+    authenticated: true,
+    awaitingCharge: true,
+    entitlementGranted: false,
+  };
+};
+
+/**
+ * Razorpay emits completed when all invoices have been generated. Preserve
+ * the final paid period, then let the expiry scheduler downgrade the account.
+ */
+export const processSubscriptionCompletedEvent = async (payload: any) => {
+  const entity = payload?.subscription?.entity;
+  if (!entity?.id || entity.status !== "completed") {
+    throw new Error("Invalid subscription.completed payload");
+  }
+
+  const providerPeriodStart = Number.isFinite(entity.current_start)
+    ? new Date(entity.current_start * 1000)
+    : null;
+  const providerPeriodEnd = Number.isFinite(entity.current_end)
+    ? new Date(entity.current_end * 1000)
+    : null;
+  if (
+    (providerPeriodStart && !Number.isFinite(providerPeriodStart.getTime())) ||
+    (providerPeriodEnd && !Number.isFinite(providerPeriodEnd.getTime())) ||
+    (providerPeriodStart &&
+      providerPeriodEnd &&
+      providerPeriodEnd <= providerPeriodStart)
+  ) {
+    throw new Error("Invalid completed subscription period");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const subscription = await tx.subscription.findUnique({
+      where: { razorpaySubscriptionId: entity.id },
+    });
+    if (!subscription) throw new Error("Subscription not found");
+
+    if (
+      subscription.status === SubscriptionStatus.CANCELLED ||
+      subscription.status === SubscriptionStatus.EXPIRED ||
+      subscription.status === SubscriptionStatus.REFUNDED
+    ) {
+      return { ignored: true };
+    }
+
+    const periodStart = providerPeriodStart ?? subscription.currentPeriodStart;
+    const periodEnd = providerPeriodEnd ?? subscription.currentPeriodEnd;
+    const hasPaidTimeRemaining = Boolean(periodEnd && periodEnd > new Date());
+
+    // "completed" describes the provider subscription lifecycle, not proof
+    // that CloudBox received a successful charge. Preserve an existing
+    // entitlement only when a captured (or partially refunded) invoice is
+    // already recorded locally. Never grant a plan from this event alone.
+    const user = await tx.user.findUnique({
+      where: { id: subscription.userId },
+      select: { plan: true },
+    });
+    // Without known period boundaries, there is no safe way to associate a
+    // historical payment with the final completed billing cycle.
+    const paidPayment = periodStart && periodEnd
+      ? await tx.payment.findFirst({
+          where: {
+            subscriptionId: subscription.id,
+            status: {
+              in: [
+                PaymentStatus.CAPTURED,
+                PaymentStatus.PARTIALLY_REFUNDED,
+              ],
+            },
+            amount: SUBSCRIPTION_PLANS[subscription.plan].price,
+            // A payment from an earlier billing cycle cannot justify access
+            // through the final period of a completed subscription.
+            paidAt: { gte: periodStart, lte: periodEnd },
+          },
+          select: { id: true },
+        })
+      : null;
+
+    const hasRecordedEntitlement =
+      user?.plan === subscription.plan && Boolean(paidPayment);
+
+    if (hasPaidTimeRemaining && hasRecordedEntitlement) {
+      await tx.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          status: SubscriptionStatus.ACTIVE,
+          currentPeriodEnd: periodEnd,
+          cancelAtPeriodEnd: true,
+          gracePeriodEnd: null,
+        },
+      });
+      await tx.user.update({
+        where: { id: subscription.userId },
+        data: {
+          subscriptionStatus: SubscriptionStatus.ACTIVE,
+          currentPeriodEnd: periodEnd,
+          gracePeriodEnd: null,
+        },
+      });
+      return { completed: true, accessUntil: periodEnd, entitlementPreserved: true };
+    }
+
+    await tx.subscription.update({
+      where: { id: subscription.id },
+      data: {
+        status: SubscriptionStatus.CANCELLED,
+        cancelledAt: new Date(),
+        endDate: new Date(),
+        cancelAtPeriodEnd: false,
+        gracePeriodEnd: null,
+      },
+    });
+
+    const another = await tx.subscription.findFirst({
+      where: {
+        userId: subscription.userId,
+        id: { not: subscription.id },
+        status: {
+          in: [
+            SubscriptionStatus.ACTIVE,
+            SubscriptionStatus.PAST_DUE,
+            SubscriptionStatus.HALTED,
+          ],
+        },
+      },
+    });
+
+    if (!another && user?.plan === subscription.plan) {
+      await tx.user.update({
+        where: { id: subscription.userId },
+        data: {
+          plan: Plan.FREE,
+          subscriptionStatus: SubscriptionStatus.CANCELLED,
+          currentPeriodEnd: null,
+          gracePeriodEnd: null,
+          storageLimit: SUBSCRIPTION_PLANS.FREE.storageLimit,
+        },
+      });
+    }
+
+    return {
+      completed: true,
+      accessUntil: null,
+      entitlementPreserved: false,
+    };
+  });
+};
+
+export const processSubscriptionInformationalEvent = async (
+  payload: any,
+  event: "updated" | "paused"
+) => {
+  const entity = payload?.subscription?.entity;
+  if (!entity?.id) {
+    throw new Error(`Invalid subscription.${event} payload`);
+  }
+
+  const subscription = await prisma.subscription.findUnique({
+    where: { razorpaySubscriptionId: entity.id },
+    select: { id: true },
+  });
+  if (!subscription) throw new Error("Subscription not found");
+
+  return { acknowledged: true, entitlementChanged: false };
 };

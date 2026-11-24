@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ArrowLeft, CalendarClock, CreditCard, RefreshCw, ReceiptText, ShieldCheck, XCircle } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { api } from "../../../services/api";
+import {
+  loadRazorpayCheckout,
+  openRazorpaySubscriptionCheckout,
+} from "../../../services/razorpay-checkout";
 import { getApiErrorMessage } from "../../../services/api-error";
 import type { Page } from "../../App";
 
@@ -25,6 +30,7 @@ type Subscription = {
   currentPeriodEnd?: string | null;
   cancelAtPeriodEnd?: boolean;
   checkoutUrl?: string | null;
+  razorpaySubscriptionId?: string | null;
   createdAt?: string;
 };
 
@@ -34,6 +40,7 @@ type BillingOverview = {
   currentPeriodEnd?: string | null;
   gracePeriodEnd?: string | null;
   currentSubscription: Subscription | null;
+  razorpayKeyId?: string;
 };
 
 interface Props {
@@ -52,6 +59,7 @@ function formatMoney(amount: number, currency: string): string {
 
 export function BillingPage({ navigate }: Props) {
   const { user, refreshUser } = useAuth();
+  const routerNavigate = useNavigate();
   const [overview, setOverview] = useState<BillingOverview | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,6 +86,25 @@ export function BillingPage({ navigate }: Props) {
     return () => { mounted = false; };
   }, [loadBilling]);
 
+  // Refresh billing when the customer returns from Razorpay hosted
+  // checkout or switches back to this tab after a payment attempt.
+  useEffect(() => {
+    const refreshOnReturn = () => {
+      if (document.visibilityState !== "visible") return;
+      void Promise.all([loadBilling(), refreshUser()]).catch(() => {
+        // Preserve the current view; the explicit Refresh action remains available.
+      });
+    };
+
+    window.addEventListener("focus", refreshOnReturn);
+    document.addEventListener("visibilitychange", refreshOnReturn);
+
+    return () => {
+      window.removeEventListener("focus", refreshOnReturn);
+      document.removeEventListener("visibilitychange", refreshOnReturn);
+    };
+  }, [loadBilling, refreshUser]);
+
   const refresh = async () => {
     setError("");
     setRefreshing(true);
@@ -92,13 +119,20 @@ export function BillingPage({ navigate }: Props) {
   };
 
   const cancelAtPeriodEnd = async () => {
+    const alreadyScheduled = Boolean(subscription?.cancelAtPeriodEnd);
     const periodEnd = subscription?.currentPeriodEnd
       ? new Date(subscription.currentPeriodEnd)
       : null;
-    const canKeepAccess = Boolean(periodEnd && periodEnd > new Date());
-    const confirmation = canKeepAccess
-      ? "Schedule cancellation at the end of the current billing period? Paid access will remain until then."
-      : "Cancel this subscription now? This will stop future billing and keep the account on the Free plan.";
+    const canKeepAccess = Boolean(
+      subscription?.status !== "REFUNDED" &&
+      periodEnd &&
+      periodEnd > new Date()
+    );
+    const confirmation = alreadyScheduled
+      ? "Retry the cancellation request with Razorpay to confirm the scheduled end-of-cycle cancellation? Your current paid access will remain unchanged."
+      : canKeepAccess
+        ? "Schedule cancellation at the end of the current billing period? Paid access will remain until then."
+        : "Cancel this subscription now? This will stop future billing and keep the account on the Free plan.";
     if (!window.confirm(confirmation)) return;
     setError("");
     setNotice("");
@@ -107,21 +141,83 @@ export function BillingPage({ navigate }: Props) {
       await api.post("/subscriptions/cancel");
       await Promise.all([loadBilling(), refreshUser()]);
       setNotice(canKeepAccess
-        ? "Cancellation has been scheduled. Your paid access remains until the current period ends."
+        ? alreadyScheduled
+          ? "Razorpay accepted the cancellation request again. Your paid access remains until the current period ends."
+          : "Cancellation has been scheduled. Your paid access remains until the current period ends."
         : "The subscription has been cancelled. Your account is now on the Free plan.");
     } catch (cancelError) {
-      setError(getApiErrorMessage(cancelError, "Unable to cancel the subscription."));
+      setError(getApiErrorMessage(cancelError, "Unable to cancel or verify the subscription cancellation."));
     } finally {
       setCancelling(false);
     }
   };
 
   const subscription = overview?.currentSubscription;
+  const isTerminalSubscription = ["CANCELLED", "EXPIRED", "REFUNDED"].includes(
+    subscription?.status ?? overview?.subscriptionStatus ?? ""
+  );
   const canCancel = Boolean(
     subscription &&
-    ["ACTIVE", "PAST_DUE", "HALTED", "REFUNDED"].includes(subscription.status) &&
-    !subscription.cancelAtPeriodEnd
+    ["ACTIVE", "PAST_DUE", "HALTED", "REFUNDED"].includes(subscription.status)
   );
+
+  const resumeCheckout = async () => {
+    if (!subscription?.razorpaySubscriptionId || !overview?.razorpayKeyId) {
+      setError("Checkout details are unavailable. Refresh Billing and try again.");
+      return;
+    }
+
+    setError("");
+    try {
+      await loadRazorpayCheckout();
+      openRazorpaySubscriptionCheckout(
+        {
+          key: overview.razorpayKeyId,
+          subscription_id: subscription.razorpaySubscriptionId,
+          name: "CloudBox",
+          description: `CloudBox ${subscription.plan} monthly subscription`,
+          prefill: {
+            name: user?.name,
+            email: user?.email,
+          },
+          notes: {
+            application: "CloudBox",
+            plan: subscription.plan,
+          },
+          theme: { color: "#514BFF" },
+          handler: (checkoutResponse) => {
+            if (checkoutResponse.razorpay_subscription_id !== subscription.razorpaySubscriptionId) {
+              setError("Razorpay returned a response for a different subscription. Please contact support before retrying.");
+              return;
+            }
+
+            void api.post("/subscriptions/verify-checkout", checkoutResponse)
+              .then(() => {
+                routerNavigate(`/dashboard?billing=processing&plan=${subscription.plan}`);
+              })
+              .catch(async (verificationError) => {
+                setError(
+                  `${getApiErrorMessage(verificationError, "Unable to verify the Razorpay checkout response.")} Do not pay again. Refresh Billing and check the Razorpay webhook status.`
+                );
+                await Promise.all([loadBilling(), refreshUser()]).catch(() => undefined);
+              });
+          },
+          modal: {
+            ondismiss: () => {
+              setNotice("Checkout was closed. Your subscription remains pending; you can resume it from this page.");
+              void Promise.all([loadBilling(), refreshUser()]).catch(() => undefined);
+            },
+          },
+        },
+        (message) => {
+          setError(message);
+          void Promise.all([loadBilling(), refreshUser()]).catch(() => undefined);
+        }
+      );
+    } catch (resumeError) {
+      setError(getApiErrorMessage(resumeError, "Unable to resume Razorpay Checkout."));
+    }
+  };
 
   return (
     <div className="min-h-screen cloudbox-font-body" style={{ background: "#F4F4FF" }}>
@@ -160,17 +256,19 @@ export function BillingPage({ navigate }: Props) {
                   </div>
                   <span className="rounded-full bg-[#F2F1FF] px-3 py-1.5 text-xs font-bold text-[#514BFF]">{subscription?.status ?? overview?.subscriptionStatus ?? "FREE"}</span>
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="rounded-2xl bg-[#F7F7FF] p-4"><p className="text-xs text-[#8585A0]">Current period ends</p><p className="mt-1 font-semibold text-[#1A1A2E]">{formatDate(subscription?.currentPeriodEnd ?? overview?.currentPeriodEnd)}</p></div>
-                  <div className="rounded-2xl bg-[#F7F7FF] p-4"><p className="text-xs text-[#8585A0]">Grace period ends</p><p className="mt-1 font-semibold text-[#1A1A2E]">{formatDate(overview?.gracePeriodEnd)}</p></div>
-                </div>
+                {!isTerminalSubscription && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="rounded-2xl bg-[#F7F7FF] p-4"><p className="text-xs text-[#8585A0]">Current period ends</p><p className="mt-1 font-semibold text-[#1A1A2E]">{formatDate(subscription?.currentPeriodEnd ?? overview?.currentPeriodEnd)}</p></div>
+                    <div className="rounded-2xl bg-[#F7F7FF] p-4"><p className="text-xs text-[#8585A0]">Grace period ends</p><p className="mt-1 font-semibold text-[#1A1A2E]">{formatDate(overview?.gracePeriodEnd)}</p></div>
+                  </div>
+                )}
                 {subscription?.cancelAtPeriodEnd && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Cancellation is scheduled. Your paid plan remains available until {formatDate(subscription.currentPeriodEnd)}.</p>}
                 {subscription?.status === "CREATED" && (
                   <div className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
                     <p>Your subscription is awaiting payment authorization. Resume hosted checkout to complete payment.</p>
-                    {subscription.checkoutUrl && (
+                    {subscription.razorpaySubscriptionId && overview?.razorpayKeyId && (
                       <button
-                        onClick={() => window.location.assign(subscription.checkoutUrl!)}
+                        onClick={() => void resumeCheckout()}
                         className="mt-3 rounded-lg bg-amber-900 px-4 py-2 font-semibold text-white"
                       >
                         Resume Razorpay checkout
@@ -182,7 +280,7 @@ export function BillingPage({ navigate }: Props) {
                 {subscription?.status === "HALTED" && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Razorpay has halted this subscription. Your grace period ends {formatDate(overview?.gracePeriodEnd)}. Resolve the payment issue or cancel the subscription.</p>}
                 {subscription?.status === "REFUNDED" && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">A full refund has been recorded and paid access has been revoked. Cancel the provider subscription here to stop future billing.</p>}
                 {subscription?.status === "ACTIVE" && overview?.plan !== subscription.plan && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Your {subscription.plan} subscription is active with Razorpay. CloudBox will enable the paid plan and its storage limit after Razorpay confirms the first successful plan charge.</p>}
-                {canCancel && <button onClick={() => void cancelAtPeriodEnd()} disabled={cancelling} className="mt-5 inline-flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"><XCircle className="h-4 w-4" /> {cancelling ? "Scheduling…" : "Cancel at period end"}</button>}
+                {canCancel && <button onClick={() => void cancelAtPeriodEnd()} disabled={cancelling} className="mt-5 inline-flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"><XCircle className="h-4 w-4" /> {cancelling ? "Checking…" : subscription?.cancelAtPeriodEnd ? "Retry cancellation" : "Cancel at period end"}</button>}
                 {subscription?.cancelAtPeriodEnd && <p className="mt-4 text-sm text-[#6B6B8A]">The subscription is already scheduled to cancel at the end of the billing period.</p>}
               </div>
 

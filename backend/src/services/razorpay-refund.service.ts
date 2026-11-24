@@ -5,6 +5,7 @@ import {
 } from "@prisma/client";
 
 import prisma from "../config/prisma";
+import { ensureRazorpaySubscriptionCancelled } from "./razorpay.service";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
 import { unwrapRazorpayWebhookPayload } from "../utils/razorpay-webhook-payload";
 
@@ -21,7 +22,11 @@ type ProcessedRefund = {
  * Apply a final refund exactly once. Only refund.processed is used, so
  * pending refunds never revoke paid access.
  */
-export const processRefundProcessedEvent = async (payload: unknown) => {
+export const processRefundProcessedEvent = async (
+  payload: unknown,
+  cancelProviderSubscription: (subscriptionId: string) => Promise<unknown> =
+    ensureRazorpaySubscriptionCancelled
+) => {
   const eventPayload = unwrapRazorpayWebhookPayload(payload);
   const refund = eventPayload?.refund?.entity as ProcessedRefund | undefined;
 
@@ -45,13 +50,14 @@ export const processRefundProcessedEvent = async (payload: unknown) => {
     throw new Error("Invalid refund processed timestamp");
   }
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const payment = await tx.payment.findUnique({
       where: { razorpayPaymentId: refund.payment_id },
       include: {
         subscription: {
           select: {
             id: true,
+            razorpaySubscriptionId: true,
             userId: true,
             plan: true,
             status: true,
@@ -72,14 +78,14 @@ export const processRefundProcessedEvent = async (payload: unknown) => {
       throw new Error("Refund currency does not match the captured payment");
     }
 
-    if (payment.status === PaymentStatus.REFUNDED) {
-      // Any further refund against an already fully refunded payment is invalid.
-      throw new Error("Payment has already been fully refunded");
-    }
-
+    // REFUNDED is accepted here only so a retried webhook for the same
+    // refund ID can reach the idempotency check below and retry provider
+    // cancellation. A different refund ID still fails the guarded amount
+    // update and the transaction rolls back.
     const isRefundablePayment =
       payment.status === PaymentStatus.CAPTURED ||
-      payment.status === PaymentStatus.PARTIALLY_REFUNDED;
+      payment.status === PaymentStatus.PARTIALLY_REFUNDED ||
+      payment.status === PaymentStatus.REFUNDED;
 
     if (!isRefundablePayment) {
       throw new Error("Refund does not match a captured INR payment");
@@ -126,6 +132,10 @@ export const processRefundProcessedEvent = async (payload: unknown) => {
         duplicate: true,
         paymentStatus: latestPayment?.status ?? payment.status,
         amountRefunded: latestPayment?.amountRefunded ?? payment.amountRefunded,
+        shouldCancelProviderSubscription:
+          latestPayment?.status === PaymentStatus.REFUNDED &&
+          payment.subscription.status === SubscriptionStatus.REFUNDED,
+        razorpaySubscriptionId: payment.subscription.razorpaySubscriptionId,
       };
     }
 
@@ -174,6 +184,7 @@ export const processRefundProcessedEvent = async (payload: unknown) => {
     });
 
     let entitlementRevoked = false;
+    let shouldCancelProviderSubscription = false;
 
     if (isFullyRefunded) {
       const subscription = payment.subscription;
@@ -190,6 +201,12 @@ export const processRefundProcessedEvent = async (payload: unknown) => {
           paidAt >= periodStart - 24 * 60 * 60 * 1000 &&
           (periodEnd === null || paidAt < periodEnd)
         );
+
+      shouldCancelProviderSubscription =
+        isCurrentBillingCyclePayment &&
+        subscription.status !== SubscriptionStatus.CANCELLED &&
+        subscription.status !== SubscriptionStatus.EXPIRED &&
+        subscription.status !== SubscriptionStatus.REFUNDED;
 
       if (
         isCurrentBillingCyclePayment &&
@@ -258,6 +275,101 @@ export const processRefundProcessedEvent = async (payload: unknown) => {
       paymentStatus,
       amountRefunded: updatedPayment.amountRefunded,
       entitlementRevoked,
+      shouldCancelProviderSubscription,
+      razorpaySubscriptionId: payment.subscription.razorpaySubscriptionId,
     };
   });
+
+  // Do not perform network calls inside the database transaction. If Razorpay
+  // is unavailable, the webhook remains retryable; duplicate refund delivery
+  // reaches the same cancellation step without double-counting the refund.
+  if (
+    result.shouldCancelProviderSubscription &&
+    result.razorpaySubscriptionId
+  ) {
+    await cancelProviderSubscription(result.razorpaySubscriptionId);
+
+    // Provider cancellation is confirmed. Move the subscription out of the
+    // REFUNDED transitional state so the customer can start a fresh checkout.
+    // If this DB transaction fails, the webhook retry re-fetches the provider
+    // state (already cancelled) and safely retries this finalization.
+    await prisma.$transaction(async (tx) => {
+      const subscription = await tx.subscription.findUnique({
+        where: {
+          razorpaySubscriptionId: result.razorpaySubscriptionId!,
+        },
+      });
+
+      if (!subscription || subscription.status !== SubscriptionStatus.REFUNDED) {
+        return;
+      }
+
+      const cancelledAt = new Date();
+
+      await tx.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          status: SubscriptionStatus.CANCELLED,
+          cancelledAt,
+          endDate: cancelledAt,
+          cancelAtPeriodEnd: false,
+          gracePeriodEnd: null,
+        },
+      });
+
+      const anotherEntitledSubscription = await tx.subscription.findFirst({
+        where: {
+          userId: subscription.userId,
+          id: { not: subscription.id },
+          status: {
+            in: [
+              SubscriptionStatus.ACTIVE,
+              SubscriptionStatus.PAST_DUE,
+              SubscriptionStatus.HALTED,
+            ],
+          },
+        },
+        select: {
+          plan: true,
+          status: true,
+          currentPeriodEnd: true,
+          gracePeriodEnd: true,
+        },
+      });
+
+      if (anotherEntitledSubscription) {
+        await tx.user.update({
+          where: { id: subscription.userId },
+          data: {
+            plan: anotherEntitledSubscription.plan,
+            subscriptionStatus: anotherEntitledSubscription.status,
+            currentPeriodEnd: anotherEntitledSubscription.currentPeriodEnd,
+            gracePeriodEnd: anotherEntitledSubscription.gracePeriodEnd,
+            storageLimit:
+              SUBSCRIPTION_PLANS[anotherEntitledSubscription.plan].storageLimit,
+          },
+        });
+      } else {
+        await tx.user.update({
+          where: { id: subscription.userId },
+          data: {
+            plan: Plan.FREE,
+            subscriptionStatus: SubscriptionStatus.CANCELLED,
+            currentPeriodEnd: null,
+            gracePeriodEnd: null,
+            storageLimit: SUBSCRIPTION_PLANS.FREE.storageLimit,
+          },
+        });
+      }
+    });
+  }
+
+  return {
+    duplicate: result.duplicate,
+    paymentStatus: result.paymentStatus,
+    amountRefunded: result.amountRefunded,
+    ...( "entitlementRevoked" in result
+      ? { entitlementRevoked: result.entitlementRevoked }
+      : {}),
+  };
 };

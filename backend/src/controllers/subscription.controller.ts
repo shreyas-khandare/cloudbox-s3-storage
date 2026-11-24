@@ -1,8 +1,11 @@
 import { Request, Response, NextFunction } from "express";
+import { verifyRazorpaySubscriptionCheckoutSignature } from "../utils/razorpay-subscription-signature";
+import { env } from "../config/env";
 import { Plan, SubscriptionStatus } from "@prisma/client";
 import { createSubscription } from "../services/subscription.service";
 import { SUBSCRIPTION_PLANS } from "../config/subscription-plans";
 import { MAX_SINGLE_UPLOAD_SIZE } from "../config/upload";
+import { requestRazorpayCancellation } from "../services/subscription-cancellation.service";
 import { cancelRazorpaySubscription } from "../services/razorpay.service";
 import prisma from "../config/prisma";
 
@@ -111,6 +114,93 @@ export const createSubscriptionController = async (
   }
 };
 
+
+export const verifySubscriptionCheckoutController = async (
+  req: Request,
+  res: Response
+) => {
+  const {
+    razorpay_payment_id: paymentId,
+    razorpay_subscription_id: checkoutSubscriptionId,
+    razorpay_signature: signature,
+  } = req.body ?? {};
+
+  if (
+    typeof paymentId !== "string" ||
+    !paymentId.trim() ||
+    typeof checkoutSubscriptionId !== "string" ||
+    !checkoutSubscriptionId.trim() ||
+    typeof signature !== "string"
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid Razorpay checkout response",
+    });
+  }
+
+  try {
+    // Resolve the subscription from CloudBox's database for the signed-in user.
+    // Never trust a subscription ID supplied by the browser without this lookup.
+    const subscription = await prisma.subscription.findFirst({
+      where: {
+        userId: req.user!.id,
+        razorpaySubscriptionId: checkoutSubscriptionId,
+      },
+      select: {
+        id: true,
+        razorpaySubscriptionId: true,
+        status: true,
+      },
+    });
+
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: "Subscription does not belong to this account",
+      });
+    }
+
+    if (
+      subscription.status === SubscriptionStatus.CANCELLED ||
+      subscription.status === SubscriptionStatus.EXPIRED ||
+      subscription.status === SubscriptionStatus.REFUNDED
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "This subscription is no longer eligible for checkout confirmation",
+      });
+    }
+
+    const signatureValid = verifyRazorpaySubscriptionCheckoutSignature(
+      paymentId,
+      subscription.razorpaySubscriptionId,
+      signature,
+      env.RAZORPAY.KEY_SECRET
+    );
+
+    if (!signatureValid) {
+      return res.status(400).json({
+        success: false,
+        message: "Razorpay checkout signature verification failed",
+      });
+    }
+
+    // This endpoint confirms the browser checkout response only. Paid plan
+    // entitlements are still granted exclusively by the verified webhook.
+    return res.status(200).json({
+      success: true,
+      verified: true,
+      message: "Checkout response verified. Waiting for Razorpay webhook confirmation.",
+    });
+  } catch (error) {
+    console.error("[Billing] Subscription checkout verification failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Unable to verify the Razorpay checkout response",
+    });
+  }
+};
+
 export const getSubscriptionPlansController = (
   _req: Request,
   res: Response
@@ -160,6 +250,7 @@ export const getMySubscriptionController = async (
             currentPeriodEnd: true,
             cancelAtPeriodEnd: true,
             checkoutUrl: true,
+            razorpaySubscriptionId: true,
             createdAt: true,
           },
         },
@@ -180,6 +271,7 @@ export const getMySubscriptionController = async (
         storageUsed: user.storageUsed.toString(),
         storageLimit: user.storageLimit.toString(),
         currentSubscription: user.subscriptions[0] ?? null,
+        razorpayKeyId: env.RAZORPAY.KEY_ID,
         subscriptions: undefined,
       },
     });
@@ -265,41 +357,84 @@ export const cancelSubscriptionController = async (
     });
   }
 
-  if (subscription.cancelAtPeriodEnd) {
-    return res.status(200).json({
-      message: "Subscription cancellation is already scheduled",
-      cancelAtPeriodEnd: true,
-      currentPeriodEnd: subscription.currentPeriodEnd,
-    });
-  }
+  const cancellationIntentAlreadyPresent = subscription.cancelAtPeriodEnd;
 
   const now = new Date();
+  // A fully refunded subscription must be cancelled immediately even
+  // when its previous billing period has a future end date. Scheduling
+  // cancellation would leave the provider subscription capable of charging.
   const keepAccessUntilPeriodEnd =
+    subscription.status !== SubscriptionStatus.REFUNDED &&
     subscription.currentPeriodEnd !== null &&
     subscription.currentPeriodEnd > now;
 
-  // If a future paid period remains, schedule cancellation for its end.
-  // Past-due/halted/refunded subscriptions whose period has ended are
-  // cancelled immediately, removing the provider's future billing schedule.
-  try {
-    await cancelRazorpaySubscription(
-      subscription.razorpaySubscriptionId,
-      keepAccessUntilPeriodEnd
-    );
-  } catch (error) {
-    console.error("[Billing] Razorpay rejected cancellation:", error);
-    return res.status(502).json({
-      message: "Razorpay could not cancel the subscription. No local billing changes were made.",
-    });
-  }
-
-  try {
-    if (keepAccessUntilPeriodEnd) {
+  // Persist cycle-end intent before calling Razorpay. Razorpay can emit
+  // subscription.cancelled while the API request is still in flight; the
+  // webhook must already know to preserve the customer's paid access.
+  if (keepAccessUntilPeriodEnd && !cancellationIntentAlreadyPresent) {
+    try {
       await prisma.subscription.update({
         where: { id: subscription.id },
         data: { cancelAtPeriodEnd: true },
       });
-    } else {
+    } catch (error) {
+      console.error("[Billing] Failed to persist scheduled cancellation intent:", error);
+      return res.status(503).json({
+        message: "Billing data could not be updated. No cancellation was requested.",
+      });
+    }
+  }
+
+  // If a future paid period remains, schedule cancellation for its end.
+  // Past-due/halted/refunded subscriptions whose period has ended are
+  // cancelled immediately, removing the provider's future billing schedule.
+  const cancellationRequest = await requestRazorpayCancellation(
+    subscription.razorpaySubscriptionId,
+    keepAccessUntilPeriodEnd,
+    cancellationIntentAlreadyPresent,
+    cancelRazorpaySubscription
+  );
+
+  if (cancellationRequest.kind === "reconciliation_required") {
+    console.error("[Billing] Razorpay cancellation outcome requires reconciliation:", cancellationRequest.error);
+    return res.status(503).json({
+      message: cancellationIntentAlreadyPresent
+        ? "CloudBox still has a cancellation request recorded, but Razorpay could not reconfirm it. Your access has not been removed. Retry the verification or contact support."
+        : "Razorpay's cancellation outcome could not be confirmed. CloudBox has retained the cancellation intent; retry the verification later.",
+      reconciliationRequired: true,
+    });
+  }
+
+  if (cancellationRequest.kind === "rejected") {
+    console.error("[Billing] Razorpay rejected the cancellation request:", cancellationRequest.error);
+
+    // Roll back only intent written by this request. If a previous request
+    // already persisted the intent, retain it until provider state is reconciled.
+    if (keepAccessUntilPeriodEnd && !cancellationIntentAlreadyPresent) {
+      try {
+        await prisma.subscription.updateMany({
+          where: {
+            id: subscription.id,
+            cancelAtPeriodEnd: true,
+          },
+          data: { cancelAtPeriodEnd: false },
+        });
+      } catch (rollbackError) {
+        console.error("[Billing] Failed to roll back rejected cancellation intent:", rollbackError);
+        return res.status(503).json({
+          message: "Razorpay rejected cancellation and CloudBox could not roll back the pending request. Refresh Billing before retrying.",
+          reconciliationRequired: true,
+        });
+      }
+    }
+
+    return res.status(502).json({
+      message: "Razorpay rejected the cancellation request. No cancellation was scheduled.",
+    });
+  }
+
+  try {
+    if (!keepAccessUntilPeriodEnd) {
       await prisma.$transaction(async (tx) => {
         await tx.subscription.update({
           where: { id: subscription.id },

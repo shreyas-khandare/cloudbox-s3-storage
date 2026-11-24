@@ -5,6 +5,7 @@ import { OAuth2Client } from "google-auth-library";
 import prisma from "../config/prisma";
 import { createSession, revokeSession } from "../services/session.service";
 import { generateAndSendOTP, verifyOTP } from "../services/otp.service";
+import { getOrCreateDeviceId } from "../utils/session-device";
 import { env } from "../config/env";
 import {
   isServiceUnavailable,
@@ -281,7 +282,8 @@ export const login = async (req: Request, res: Response) => {
             });
         }
 
-        const session = await createSession(user.id);
+        const deviceId = getOrCreateDeviceId(req, res);
+        const session = await createSession(user.id, deviceId);
 
         setSessionCookie(res, session.token, session.maxAge);
 
@@ -435,6 +437,8 @@ export const logout = async (
       await revokeSession(token);
     }
 
+    // Keep device_id: logging out must not turn this browser profile into a
+    // new device when it signs in again.
     res.clearCookie("token", {
       httpOnly: true,
       secure: env.NODE_ENV === "production",
@@ -522,7 +526,8 @@ export const googleLogin = async (req: Request, res: Response) => {
             });
         }
 
-        const session = await createSession(user.id);
+        const deviceId = getOrCreateDeviceId(req, res);
+        const session = await createSession(user.id, deviceId);
 
         setSessionCookie(res, session.token, session.maxAge);
 

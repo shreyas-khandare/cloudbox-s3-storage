@@ -14,6 +14,7 @@ import {
   Check, Folder, Eye
 } from "lucide-react";
 import type { Page } from "../../App";
+import { useLocation, useNavigate } from "react-router-dom";
 
 interface Props {
   navigate: (page: Page) => void;
@@ -99,6 +100,8 @@ const FILE_ICONS: Record<FileType | string, { icon: React.ElementType; color: st
 
 export function UserDashboard({ navigate }: Props) {
   const { user, logout, refreshUser } = useAuth();
+  const location = useLocation();
+  const routerNavigate = useNavigate();
   const [files, setFiles] = useState<CloudFile[]>([]);
   const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>([]);
   const [activeNav, setActiveNav] = useState("files");
@@ -108,6 +111,7 @@ export function UserDashboard({ navigate }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ name: string; progress: number } | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [subscriptionNotice, setSubscriptionNotice] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchFiles = useCallback(async (): Promise<void> => {
@@ -133,6 +137,63 @@ export function UserDashboard({ navigate }: Props) {
     void fetchFiles();
     void fetchSubscriptionPlans();
   }, [fetchFiles, fetchSubscriptionPlans]);
+
+  // A verified checkout response returns the customer to the dashboard.
+  // Keep refreshing the account briefly while the authoritative webhook is
+  // processed; never grant a plan from the browser checkout response.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const billingState = params.get("billing");
+    const targetPlan = params.get("plan");
+
+    if (
+      billingState !== "processing" ||
+      (targetPlan !== "PRO" && targetPlan !== "BUSINESS")
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+    let timer: number | undefined;
+
+    setSubscriptionNotice(
+      "Payment response verified. CloudBox is confirming your subscription with Razorpay..."
+    );
+
+    const checkEntitlement = async () => {
+      try {
+        const latestUser = await refreshUser();
+        if (cancelled) return;
+
+        if (latestUser?.plan === targetPlan) {
+          setSubscriptionNotice(`${targetPlan} is now active. Your CloudBox storage has been updated.`);
+          routerNavigate("/dashboard", { replace: true });
+          return;
+        }
+      } catch {
+        // Retry briefly if the API or webhook processing is still catching up.
+      }
+
+      attempts += 1;
+      if (attempts >= 20) {
+        setSubscriptionNotice(
+          "Your checkout response was verified, but CloudBox is still waiting for Razorpay's payment webhook. Check Billing for the latest status. Do not submit another payment."
+        );
+        routerNavigate("/dashboard", { replace: true });
+        return;
+      }
+
+      timer = window.setTimeout(() => void checkEntitlement(), 3000);
+    };
+
+    void checkEntitlement();
+
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [location.search, refreshUser, routerNavigate]);
 
   const getErrorMessage = (error: unknown, fallback: string): string =>
     getApiErrorMessage(error, fallback);
@@ -523,6 +584,20 @@ export function UserDashboard({ navigate }: Props) {
         </header>
 
         <main className="flex-1 overflow-y-auto p-6">
+          {subscriptionNotice && (
+            <div
+              role="status"
+              className="mb-5 flex flex-col gap-3 rounded-2xl border border-[#DCD9FF] bg-white px-4 py-3 text-sm text-[#45418D] sm:flex-row sm:items-center sm:justify-between"
+            >
+              <span>{subscriptionNotice}</span>
+              <button
+                onClick={() => navigate("billing")}
+                className="shrink-0 font-semibold text-[#3D38F5] underline underline-offset-2"
+              >
+                View billing
+              </button>
+            </div>
+          )}
           {/* Upload progress toast */}
           {uploadProgress && (
             <div className="fixed bottom-6 right-6 z-50 p-4 rounded-2xl shadow-xl min-w-[280px]"

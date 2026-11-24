@@ -1,6 +1,6 @@
 # Razorpay subscription setup for CloudBox
 
-CloudBox uses Razorpay **Subscriptions** for Pro and Business. The backend creates the subscription and returns Razorpay's hosted checkout URL. Razorpay webhooks, not a browser-side success message, activate the paid plan and apply the storage quota.
+CloudBox uses Razorpay **Subscriptions** for Pro and Business. The backend creates the subscription and returns its ID plus the public Razorpay Key ID. The frontend opens Razorpay Checkout.js with `subscription_id`, verifies the checkout response signature through CloudBox's backend, and returns the customer to `/dashboard`. Razorpay webhooks, not the browser response, activate the paid plan and apply the storage quota.
 
 ## 1. Create the monthly plans in Razorpay
 
@@ -55,11 +55,12 @@ The webhook route must be publicly reachable by Razorpay over HTTPS. Do not put 
 
 1. Use Razorpay Test Mode keys and Test Mode Plan IDs.
 2. Sign in to CloudBox and open `/plans`.
-3. Choose Pro or Business. CloudBox calls `POST /api/subscriptions` and displays the Razorpay-hosted checkout link returned by the backend.
-4. Complete the hosted subscription authorization with Razorpay's test credentials.
-5. Return to CloudBox. The plan remains pending until Razorpay delivers a valid webhook and the backend processes the charge.
-6. Confirm the subscription lifecycle status through `/billing`. The `subscription.activated` event records the Razorpay lifecycle state; CloudBox grants paid plan storage only after a verified `subscription.charged` event confirms the plan amount was captured.
-7. Test cancellation from `/billing`. CloudBox schedules cancellation at the end of the current billing period.
+3. Choose Pro or Business. CloudBox calls `POST /api/subscriptions`, then opens Razorpay Checkout.js using the returned `subscription_id` and public Key ID. No hosted registration-link URL is used for this browser checkout.
+4. Complete the subscription authorization in Razorpay Checkout using Razorpay's test credentials.
+5. On success, Checkout returns `razorpay_payment_id`, `razorpay_subscription_id`, and `razorpay_signature` to the frontend. CloudBox sends these values to `POST /api/subscriptions/verify-checkout`; the backend looks up the subscription belonging to the signed-in user and verifies the signature using its stored subscription ID and secret. After successful signature verification, the customer is sent to `/dashboard`.
+6. The dashboard refreshes the signed-in account while waiting for Razorpay's webhook. If the webhook is delayed, the dashboard tells the customer to check Billing and not to pay again. The signature endpoint does not grant plan access.
+7. Confirm the subscription lifecycle through `/billing`. `subscription.activated` records the provider lifecycle state; CloudBox grants paid storage only after a verified `subscription.charged` event confirms the captured plan amount.
+8. Test cancellation from `/billing`. CloudBox schedules cancellation at the end of the current billing period.
 
 A successful browser redirect alone does not activate a paid entitlement. The verified `subscription.charged` webhook is responsible for updating the user plan and storage limit.
 

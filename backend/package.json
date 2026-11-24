@@ -7,9 +7,13 @@
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "tsx --test src/config/subscription-plans.test.ts src/utils/razorpay-webhook-signature.test.ts src/middlewares/error.middleware.test.ts src/utils/dependency-error.test.ts src/utils/razorpay-webhook-payload.test.ts",
+    "test": "tsx --test src/services/razorpay.service.test.ts src/services/subscription-cancellation.service.test.ts src/config/subscription-plans.test.ts src/utils/razorpay-webhook-signature.test.ts src/utils/razorpay-subscription-signature.test.ts src/middlewares/error.middleware.test.ts src/utils/dependency-error.test.ts src/utils/razorpay-webhook-payload.test.ts",
     "reprocess:razorpay-webhooks": "tsx src/scripts/reprocess-razorpay-webhooks.ts",
-    "test:integration": "tsx --test src/services/billing.integration.test.ts"
+    "test:integration": "tsx --test src/services/billing.integration.test.ts",
+    "reprocess:razorpay-pending": "tsx src/scripts/reprocess-razorpay-pending.ts",
+    "reconcile:razorpay-refund": "tsx src/scripts/reconcile-razorpay-refund.ts",
+    "test:duplicate-webhook": "tsx src/scripts/test-duplicate-razorpay-webhook.ts",
+    "reprocess:failed-razorpay-webhooks": "tsx src/scripts/reprocess-failed-razorpay-webhooks.ts"
   },
   "keywords": [],
   "author": "",
