@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { findValidSession } from "../services/session.service";
 import { isServiceUnavailable } from "../utils/dependency-error";
+import { isValidDeviceId, setDeviceIdCookie } from "../utils/session-device";
 
 export const protect = async (
     req: Request,
@@ -20,6 +21,17 @@ export const protect = async (
         if(!session){
             res.status(401).json({message: "Invalid or expired Session"});
             return;
+        }
+
+        // Existing sessions predate the device_id cookie. Hydrate that cookie
+        // from the authenticated database session so existing users keep the
+        // same device identity when they next sign in.
+        const requestDeviceId = req.cookies?.device_id;
+        if (
+            !isValidDeviceId(requestDeviceId) ||
+            requestDeviceId.toLowerCase() !== session.deviceId
+        ) {
+            setDeviceIdCookie(res, session.deviceId);
         }
 
         //preserve the user info expected by existing controller
