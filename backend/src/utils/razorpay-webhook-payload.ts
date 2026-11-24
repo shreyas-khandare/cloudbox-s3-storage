@@ -17,6 +17,33 @@ export const unwrapRazorpayWebhookPayload = (value: any): any => {
   return value;
 };
 
+export type ParsedSubscriptionAuthenticatedEvent = {
+  subscriptionId: string;
+};
+
+/**
+ * Validate a subscription.authenticated event.
+ *
+ * The event name represents the authentication milestone; Razorpay's
+ * subscription entity snapshot can already have status "active".
+ */
+export const parseSubscriptionAuthenticatedEvent = (
+  payload: any
+): ParsedSubscriptionAuthenticatedEvent => {
+  const eventPayload = unwrapRazorpayWebhookPayload(payload);
+  const entity = eventPayload?.subscription?.entity;
+
+  if (
+    typeof entity?.id !== "string" ||
+    !entity.id.trim() ||
+    !["active", "authenticated"].includes(entity.status)
+  ) {
+    throw new Error("Invalid subscription.authenticated payload");
+  }
+
+  return { subscriptionId: entity.id.trim() };
+};
+
 export type RazorpayInvoiceSubscriptionLookup = {
   subscription_id?: string | null;
 };
