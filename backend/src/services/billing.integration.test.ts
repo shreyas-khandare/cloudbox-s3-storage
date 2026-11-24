@@ -53,19 +53,28 @@ type TestRuntime = {
   WebhookStatus: typeof import("@prisma/client").WebhookStatus;
   createSubscription: typeof import("./subscription.service").createSubscription;
   processRazorpayWebhookEvent: typeof import("./razorpay-webhook.service").processRazorpayWebhookEvent;
+  createSession: typeof import("./session.service").createSession;
+  findValidSession: typeof import("./session.service").findValidSession;
+  revokeSession: typeof import("./session.service").revokeSession;
 };
 
 let runtimePromise: Promise<TestRuntime> | undefined;
 
 const getRuntime = (): Promise<TestRuntime> => {
   runtimePromise ??= (async () => {
-    const [{ default: prisma }, prismaEnums, subscriptionService, webhookService] =
-      await Promise.all([
-        import("../config/prisma"),
-        import("@prisma/client"),
-        import("./subscription.service"),
-        import("./razorpay-webhook.service"),
-      ]);
+    const [
+      { default: prisma },
+      prismaEnums,
+      subscriptionService,
+      webhookService,
+      sessionService,
+    ] = await Promise.all([
+      import("../config/prisma"),
+      import("@prisma/client"),
+      import("./subscription.service"),
+      import("./razorpay-webhook.service"),
+      import("./session.service"),
+    ]);
 
     return {
       prisma,
@@ -75,6 +84,9 @@ const getRuntime = (): Promise<TestRuntime> => {
       WebhookStatus: prismaEnums.WebhookStatus,
       createSubscription: subscriptionService.createSubscription,
       processRazorpayWebhookEvent: webhookService.processRazorpayWebhookEvent,
+      createSession: sessionService.createSession,
+      findValidSession: sessionService.findValidSession,
+      revokeSession: sessionService.revokeSession,
     };
   })();
 
@@ -100,6 +112,9 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
     WebhookStatus,
     createSubscription,
     processRazorpayWebhookEvent,
+    createSession,
+    findValidSession,
+    revokeSession,
   } = await getRuntime();
 
   const prefix = randomUUID().replace(/-/g, "");
@@ -189,6 +204,64 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
       );
 
       assert.equal(providerCreateCalls, 0);
+    });
+
+    await t.test("reuses one session per browser profile and enforces limits across distinct devices", async () => {
+      const sessionUser = await prisma.user.create({
+        data: {
+          name: "CloudBox Device Session Test",
+          email: `device-session-${prefix}@example.test`,
+          emailVerified: true,
+        },
+        select: { id: true },
+      });
+
+      const firstDeviceId = "a".repeat(64);
+      const secondDeviceId = "b".repeat(64);
+      const thirdDeviceId = "c".repeat(64);
+
+      try {
+        const firstLogin = await createSession(sessionUser.id, firstDeviceId);
+        const firstStoredSession = await findValidSession(firstLogin.token);
+        assert.equal(firstStoredSession?.userId, sessionUser.id);
+
+        // A second login from the same browser profile rotates its token
+        // instead of inserting an additional row/device slot.
+        const repeatedLogin = await createSession(sessionUser.id, firstDeviceId);
+        assert.notEqual(repeatedLogin.token, firstLogin.token);
+        assert.equal(await findValidSession(firstLogin.token), null);
+        assert.equal((await findValidSession(repeatedLogin.token))?.userId, sessionUser.id);
+        assert.equal(await prisma.session.count({ where: { userId: sessionUser.id } }), 1);
+
+        const secondDeviceLogin = await createSession(sessionUser.id, secondDeviceId);
+        assert.ok(await findValidSession(secondDeviceLogin.token));
+        assert.equal(await prisma.session.count({ where: { userId: sessionUser.id } }), 2);
+
+        // FREE allows two distinct browser profiles, but not a third.
+        await assert.rejects(
+          createSession(sessionUser.id, thirdDeviceId),
+          /DEVICE_LIMIT_REACHED/
+        );
+
+        // Re-authentication from an already-counted device still succeeds
+        // when the device limit is full and does not create another row.
+        const secondDeviceRelogin = await createSession(sessionUser.id, secondDeviceId);
+        assert.notEqual(secondDeviceRelogin.token, secondDeviceLogin.token);
+        assert.equal(await findValidSession(secondDeviceLogin.token), null);
+        assert.equal(await prisma.session.count({ where: { userId: sessionUser.id } }), 2);
+
+        // Logging out revokes just that device's current session, freeing
+        // its slot for a different browser profile.
+        await revokeSession(repeatedLogin.token);
+        assert.equal(await prisma.session.count({ where: { userId: sessionUser.id } }), 1);
+
+        const thirdDeviceLogin = await createSession(sessionUser.id, thirdDeviceId);
+        assert.ok(await findValidSession(thirdDeviceLogin.token));
+        assert.equal(await prisma.session.count({ where: { userId: sessionUser.id } }), 2);
+      } finally {
+        await prisma.session.deleteMany({ where: { userId: sessionUser.id } });
+        await prisma.user.delete({ where: { id: sessionUser.id } });
+      }
     });
 
     const nowSeconds = Math.floor(Date.now() / 1000);
