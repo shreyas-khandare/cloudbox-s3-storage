@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  parseSubscriptionAuthenticatedEvent,
   parseSubscriptionChargedEvent,
   resolvePaymentFailedSubscriptionId,
   unwrapRazorpayWebhookPayload,
@@ -196,6 +197,51 @@ test("propagates invoice lookup failures so Razorpay can retry the webhook", asy
       }
     ),
     /Razorpay invoice API unavailable/
+  );
+});
+
+test("accepts Razorpay subscription.authenticated event with active entity status", () => {
+  const parsed = parseSubscriptionAuthenticatedEvent({
+    event: "subscription.authenticated",
+    payload: {
+      subscription: {
+        entity: {
+          id: "sub_authenticated_active",
+          status: "active",
+        },
+      },
+    },
+  });
+
+  assert.equal(parsed.subscriptionId, "sub_authenticated_active");
+});
+
+test("continues to accept the legacy authenticated entity status", () => {
+  const parsed = parseSubscriptionAuthenticatedEvent({
+    subscription: {
+      entity: {
+        id: "sub_authenticated_legacy",
+        status: "authenticated",
+      },
+    },
+  });
+
+  assert.equal(parsed.subscriptionId, "sub_authenticated_legacy");
+});
+
+test("rejects malformed subscription.authenticated event payloads", () => {
+  assert.throws(
+    () => parseSubscriptionAuthenticatedEvent({
+      subscription: { entity: { id: "sub_invalid", status: "cancelled" } },
+    }),
+    /Invalid subscription.authenticated payload/
+  );
+
+  assert.throws(
+    () => parseSubscriptionAuthenticatedEvent({
+      subscription: { entity: { status: "active" } },
+    }),
+    /Invalid subscription.authenticated payload/
   );
 });
 
