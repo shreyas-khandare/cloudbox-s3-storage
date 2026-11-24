@@ -292,7 +292,7 @@ test("billing integration: checkout persistence, webhook idempotency, and refund
         const results = await Promise.allSettled([
           createSession(concurrentUser.id, "e".repeat(64)),
           createSession(concurrentUser.id, "f".repeat(64)),
-          createSession(concurrentUser.id, "g".repeat(64)),
+          createSession(concurrentUser.id, "9".repeat(64)),
         ]);
 
         assert.equal(results.filter((result) => result.status === "fulfilled").length, 2);
