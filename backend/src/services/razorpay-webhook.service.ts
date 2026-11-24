@@ -8,7 +8,13 @@ import type { Prisma } from "@prisma/client";
 
 import prisma from "../config/prisma";
 import { processRefundProcessedEvent } from "./razorpay-refund.service";
-import { parseSubscriptionChargedEvent, unwrapRazorpayWebhookPayload } from "../utils/razorpay-webhook-payload";
+import {
+    parseSubscriptionChargedEvent,
+    resolvePaymentFailedSubscriptionId,
+    unwrapRazorpayWebhookPayload,
+    type RazorpayInvoiceSubscriptionLookup,
+} from "../utils/razorpay-webhook-payload";
+import { fetchRazorpayInvoice } from "./razorpay.service";
 
 import {
     SUBSCRIPTION_PLANS,
@@ -266,33 +272,62 @@ export const handlePaymentFailure = async (
 };
 
 export const processPaymentFailedEvent = async (
-    payload: any
+  payload: any,
+  fetchInvoice: (
+    invoiceId: string
+  ) => Promise<RazorpayInvoiceSubscriptionLookup> = fetchRazorpayInvoice
 ) => {
-    const payment = payload?.payment?.entity;
-    const subscriptionId =
-      payment?.subscription_id ?? payload?.subscription?.entity?.id;
+  const payment = payload?.payment?.entity;
 
-    if (
-        !payment?.id ||
-        !subscriptionId ||
-        payment.status !== "failed" ||
-        !Number.isInteger(payment.amount) ||
-        typeof payment.currency !== "string"
-    ) {
-        throw new Error("Invalid payment.failed payload");
-    }
+  if (
+    typeof payment?.id !== "string" ||
+    !payment.id ||
+    payment.status !== "failed" ||
+    !Number.isInteger(payment.amount) ||
+    payment.amount <= 0 ||
+    typeof payment.currency !== "string"
+  ) {
+    throw new Error("Invalid payment.failed payload");
+  }
 
-    return handlePaymentFailure(
-        subscriptionId,
-        payment.id,
-        payment.amount,
-        payment.currency,
-        payment.error_description || "Payment failed"
-    );
+  // Razorpay's payment.failed payload can omit subscription_id. Resolve the
+  // association from the invoice instead of guessing from customer email.
+  // Transient invoice API errors propagate so Razorpay can retry delivery.
+  const subscriptionId = await resolvePaymentFailedSubscriptionId(
+    payload,
+    fetchInvoice
+  );
+
+  // payment.failed is also emitted for non-subscription payments. A valid
+  // payment with no CloudBox subscription association is acknowledged without
+  // changing any user's billing entitlement.
+  if (!subscriptionId) {
+    return {
+      duplicate: false,
+      ignored: true,
+      reason: "Payment is not associated with a CloudBox subscription",
+    };
+  }
+
+  const result = await handlePaymentFailure(
+    subscriptionId,
+    payment.id,
+    payment.amount,
+    payment.currency,
+    payment.error_description || "Payment failed"
+  );
+
+  return {
+    ...result,
+    subscriptionId,
+  };
 };
 
 type RazorpayWebhookDependencies = {
   cancelRefundedSubscription?: (subscriptionId: string) => Promise<unknown>;
+  fetchInvoice?: (
+    invoiceId: string
+  ) => Promise<RazorpayInvoiceSubscriptionLookup>;
 };
 
 export const processRazorpayWebhookEvent = async (
@@ -371,9 +406,25 @@ export const processRazorpayWebhookEvent = async (
         await processSubscriptionActivatedEvent(eventPayload);
         break;
 
-      case "payment.failed":
-        await processPaymentFailedEvent(eventPayload);
+      case "payment.failed": {
+        const failureResult = await processPaymentFailedEvent(
+          eventPayload,
+          dependencies.fetchInvoice ?? fetchRazorpayInvoice
+        );
+
+        // Persist the invoice-resolved association so this event can be found
+        // later by subscription ID for diagnostics and safe reprocessing.
+        if (
+          "subscriptionId" in failureResult &&
+          typeof failureResult.subscriptionId === "string"
+        ) {
+          await prisma.razorpayWebhookEvent.update({
+            where: { eventId },
+            data: { razorpaySubscriptionId: failureResult.subscriptionId },
+          });
+        }
         break;
+      }
 
       case "refund.processed":
         await processRefundProcessedEvent(
@@ -889,7 +940,15 @@ export const processSubscriptionResumedEvent = async (
  */
 export const processSubscriptionAuthenticatedEvent = async (payload: any) => {
   const entity = payload?.subscription?.entity;
-  if (!entity?.id || entity.status !== "authenticated") {
+
+  // Razorpay names this event subscription.authenticated, but its embedded
+  // subscription snapshot already reports status "active". Accept both the
+  // current provider status and the older "authenticated" representation.
+  if (
+    typeof entity?.id !== "string" ||
+    !entity.id ||
+    !["active", "authenticated"].includes(entity.status)
+  ) {
     throw new Error("Invalid subscription.authenticated payload");
   }
 
@@ -900,6 +959,8 @@ export const processSubscriptionAuthenticatedEvent = async (payload: any) => {
 
   if (!subscription) throw new Error("Subscription not found");
 
+  // Authentication alone is not proof that the subscription invoice was
+  // captured. Paid access is still granted only by subscription.charged.
   return {
     authenticated: true,
     awaitingCharge: true,
