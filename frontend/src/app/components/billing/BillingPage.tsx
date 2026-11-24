@@ -119,6 +119,7 @@ export function BillingPage({ navigate }: Props) {
   };
 
   const cancelAtPeriodEnd = async () => {
+    const alreadyScheduled = Boolean(subscription?.cancelAtPeriodEnd);
     const periodEnd = subscription?.currentPeriodEnd
       ? new Date(subscription.currentPeriodEnd)
       : null;
@@ -127,9 +128,11 @@ export function BillingPage({ navigate }: Props) {
       periodEnd &&
       periodEnd > new Date()
     );
-    const confirmation = canKeepAccess
-      ? "Schedule cancellation at the end of the current billing period? Paid access will remain until then."
-      : "Cancel this subscription now? This will stop future billing and keep the account on the Free plan.";
+    const confirmation = alreadyScheduled
+      ? "Retry the cancellation request with Razorpay to confirm the scheduled end-of-cycle cancellation? Your current paid access will remain unchanged."
+      : canKeepAccess
+        ? "Schedule cancellation at the end of the current billing period? Paid access will remain until then."
+        : "Cancel this subscription now? This will stop future billing and keep the account on the Free plan.";
     if (!window.confirm(confirmation)) return;
     setError("");
     setNotice("");
@@ -138,10 +141,12 @@ export function BillingPage({ navigate }: Props) {
       await api.post("/subscriptions/cancel");
       await Promise.all([loadBilling(), refreshUser()]);
       setNotice(canKeepAccess
-        ? "Cancellation has been scheduled. Your paid access remains until the current period ends."
+        ? alreadyScheduled
+          ? "Razorpay accepted the cancellation request again. Your paid access remains until the current period ends."
+          : "Cancellation has been scheduled. Your paid access remains until the current period ends."
         : "The subscription has been cancelled. Your account is now on the Free plan.");
     } catch (cancelError) {
-      setError(getApiErrorMessage(cancelError, "Unable to cancel the subscription."));
+      setError(getApiErrorMessage(cancelError, "Unable to cancel or verify the subscription cancellation."));
     } finally {
       setCancelling(false);
     }
@@ -153,8 +158,7 @@ export function BillingPage({ navigate }: Props) {
   );
   const canCancel = Boolean(
     subscription &&
-    ["ACTIVE", "PAST_DUE", "HALTED", "REFUNDED"].includes(subscription.status) &&
-    !subscription.cancelAtPeriodEnd
+    ["ACTIVE", "PAST_DUE", "HALTED", "REFUNDED"].includes(subscription.status)
   );
 
   const resumeCheckout = async () => {
@@ -276,7 +280,7 @@ export function BillingPage({ navigate }: Props) {
                 {subscription?.status === "HALTED" && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Razorpay has halted this subscription. Your grace period ends {formatDate(overview?.gracePeriodEnd)}. Resolve the payment issue or cancel the subscription.</p>}
                 {subscription?.status === "REFUNDED" && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">A full refund has been recorded and paid access has been revoked. Cancel the provider subscription here to stop future billing.</p>}
                 {subscription?.status === "ACTIVE" && overview?.plan !== subscription.plan && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">Your {subscription.plan} subscription is active with Razorpay. CloudBox will enable the paid plan and its storage limit after Razorpay confirms the first successful plan charge.</p>}
-                {canCancel && <button onClick={() => void cancelAtPeriodEnd()} disabled={cancelling} className="mt-5 inline-flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"><XCircle className="h-4 w-4" /> {cancelling ? "Scheduling…" : "Cancel at period end"}</button>}
+                {canCancel && <button onClick={() => void cancelAtPeriodEnd()} disabled={cancelling} className="mt-5 inline-flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"><XCircle className="h-4 w-4" /> {cancelling ? "Checking…" : subscription?.cancelAtPeriodEnd ? "Verify cancellation" : "Cancel at period end"}</button>}
                 {subscription?.cancelAtPeriodEnd && <p className="mt-4 text-sm text-[#6B6B8A]">The subscription is already scheduled to cancel at the end of the billing period.</p>}
               </div>
 
